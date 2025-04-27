@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>pyberryplc HMI</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; }
+        label, input, button { display: block; margin: 0.5rem 0; }
+        #status { margin-top: 1rem; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>pyberryplc HMI</h1>
+
+    <h2>Motion Profile</h2>
+    <label>Acceleration Time (s):
+        <input type="number" step="0.01" id="dt_acc" value="0.5">
+    </label>
+    <label>Total Duration (s):
+        <input type="number" step="0.01" id="dt_tot" value="2.0">
+    </label>
+    <label>Total Displacement (degrees):
+        <input type="number" step="1" id="ds_tot" value="100">
+    </label>
+    <button id="set_profile_btn">Set Profile</button>
+
+    <h2>Actions</h2>
+    <button id="start_motion_btn">Start Motion</button>
+    <button id="get_status_btn">Get Status</button>
+
+    <div id="status">Status: Unknown</div>
+
+    <script>
+        const baseUrl = "http://" + window.location.hostname + ":8000";
+
+        document.getElementById("set_profile_btn").addEventListener("click", async () => {
+            const dt_acc = parseFloat(document.getElementById("dt_acc").value);
+            const dt_tot = parseFloat(document.getElementById("dt_tot").value);
+            const ds_tot = parseInt(document.getElementById("ds_tot").value);
+
+            const response = await fetch(baseUrl + "/set_profile", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ dt_acc, dt_tot, ds_tot })
+            });
+            const result = await response.json();
+            alert("Profile Updated: " + JSON.stringify(result));
+        });
+
+        document.getElementById("start_motion_btn").addEventListener("click", async () => {
+            const response = await fetch(baseUrl + "/start_motion", { method: "POST" });
+            const result = await response.json();
+            console.log("Start Requested:", result);
+
+            document.getElementById("status").textContent = "Status: Start Requested...";
+        });
+
+        document.getElementById("get_status_btn").addEventListener("click", async () => {
+            const response = await fetch(baseUrl + "/status");
+            const result = await response.json();
+            document.getElementById("status").textContent = "Status: " + JSON.stringify(result);
+        });
+
+        const ws = new WebSocket("ws://" + window.location.hostname + ":8000/ws");
+
+        ws.onopen = function() {
+            console.log("[WebSocket] Connected to server");
+        };
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            console.log("[WebSocket] Data received:", data);
+
+            let statusText = "Motor running: " + data.motor_running + " | Alarm active: " + data.alarm_active;
+            document.getElementById("status").textContent = "Status: " + statusText;
+        };
+
+        ws.onclose = function(event) {
+            console.log("[WebSocket] Disconnected from server");
+        };
+
+        ws.onerror = function(error) {
+            console.error("[WebSocket] Error:", error);
+        };
+
+    </script>
+</body>
+</html>
