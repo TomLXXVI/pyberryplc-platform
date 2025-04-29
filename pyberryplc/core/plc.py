@@ -1,13 +1,18 @@
+from typing import Any
 from abc import ABC, abstractmethod
-import sys
 import signal
 import logging
 import threading
+import time
 from dataclasses import dataclass
+
 from gpiozero.pins.pigpio import PiFactory
+
 from pyberryplc.utils import EmailNotification
+
 from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
-from .exceptions import ConfigurationError, InternalCommunicationError, EmergencyException
+from .shared_data import SharedData
+from .exceptions import *
 
 
 @dataclass
@@ -73,7 +78,7 @@ class MemoryVariable:
             self.update(0)
         else:
             raise ValueError("Memory variable is not single bit.")
-    
+        
     @property
     def rising_edge(self) -> bool:
         """Returns `True` if `prev_state` is 0 and `curr_state` is 1. Only for 
@@ -115,15 +120,23 @@ class MemoryVariable:
 
 class AbstractPLC(ABC):
     """
-    Framework class: implements the functionality common to any PLC application 
-    running on a Raspberry Pi.
+    Abstract framework class: implements all functionality common to any PLC 
+    application running on Raspberry Pi.
 
     To write a specific PLC application, the user needs to write its own class
-    derived from this base class and implement the abstract methods of this 
-    base class.
+    inherited from this base class and implement the abstract methods of this 
+    base class:
+    - `control_routine()`
+    - `exit_routine()`
+    - `emergency_routine()`
+    - `crash_routine()`
+    
     """
     def __init__(
         self,
+        scan_time: float = 0.1,
+        shared_data: SharedData | None = None,
+        logger: logging.Logger | None = None,
         pin_factory: PiFactory | None = None,
         eml_notification: EmailNotification | None = None
     ) -> None:
@@ -131,6 +144,13 @@ class AbstractPLC(ABC):
 
         Parameters
         ----------
+        scan_time : float
+            Minimum time of the PLC scan cycle. The default is 0.1 s (100 ms).
+        shared_data : SharedData, optional
+            `SharedData` object that holds inputs from the HMI, outputs to the 
+            HMI, and any other data the HMI may send to the PLC application.
+        logger : logging.Logger, optional
+            Logs messages to inspect what is going on.
         pin_factory:
             Abstraction layer that allows `gpiozero` to interface with the
             hardware-specific GPIO implementation behind the scenes. If `None`,
@@ -145,18 +165,21 @@ class AbstractPLC(ABC):
         Notes
         -----
         The PLC object has an attribute `logger` that can be used to write
-        messages to a log file and to the display of the terminal. See also
-        `logging.py`.
+        messages to a log file and for displaying in the terminal window. See 
+        also `/utils/log_utils.py`.
         """
+        self.scan_time = scan_time
+        self.shared_data = shared_data
+        
         self.pin_factory = pin_factory
         
         # Attaches the e-mail notification service (can be None).
         self.eml_notification = eml_notification
 
         # Attaches a logger to the PLC application (the logger can be configured
-        # by calling the function `init_logger()` in module `unipi.logging.py`
+        # by calling the function `init_logger()` in module `/utils/log_utils.py`
         # at the start of the main program).
-        self.logger = logging.getLogger("RPI-PLC")
+        self.logger = logger if logger else logging.getLogger(__name__)
 
         # Dictionaries that hold the inputs/outputs used by the PLC application.
         self._inputs: dict[str, GPIO] = {}
@@ -169,12 +192,106 @@ class AbstractPLC(ABC):
         self.output_registry: dict[str, MemoryVariable] = {}
         self.marker_registry: dict[str, MemoryVariable] = {}
         
-        # To terminate program: press Ctrl-Z and method `exit_handler` will be
+        # Dictionaries where the states of HMI inputs/outputs, and where other 
+        # data from the HMI are stored, if an HMI is connected to the PLC 
+        # application: 
+        self.hmi_input_registry: dict[str, MemoryVariable] = {}
+        self.hmi_output_registry: dict[str, MemoryVariable] = {}
+        self.hmi_data: dict[str, Any] = {}
+        
+        if shared_data: self._setup_shared_data()
+        
+        # To terminate program: press Ctrl-Z and method `_exit_handler` will be
         # called which terminates the PLC scanning loop.
         if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTSTP, lambda signum, frame: self.exit_handler())
+            signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
         self._exit: bool = False
 
+    def run(self):
+        """Implements the global running operation of the PLC."""
+        try:
+            while not self._exit:
+                scan_start = time.time()
+
+                try:
+                    self._update_previous_states()
+                    self._read_inputs()
+
+                    self.control_routine()  # to be implemented in derived class
+
+                except EmergencyException:
+                    self.logger.warning(
+                        "Emergency stop triggered — invoking emergency routine."
+                    )
+                    self.emergency_routine()  # to be implemented in derived class
+                    return
+
+                finally:
+                    self._write_outputs()
+
+                    scan_finish = time.time()
+                    scan_time = scan_finish - scan_start
+                    if (sleep_time := self.scan_time - scan_time) > 0:
+                        time.sleep(sleep_time)
+
+            else:
+                # `else` block is only executed when user has pressed <Ctrl-Z>
+                # to exit the program (`self._exit` has become `True`).
+                self.logger.info(
+                    "Exiting PLC program — invoking exit routine."
+                )
+                self.exit_routine()  # to be implemented in derived class
+                self._write_outputs()
+
+        except KeyboardInterrupt as e:
+            self.logger.warning(
+                "KeyboardInterrupt received — invoking crash routine."
+            )
+            self.crash_routine(e)  # to be implemented in derived class
+
+        except Exception as e:
+            self.logger.exception(
+                "Unexpected exception occurred — invoking crash routine."
+            )
+            self.crash_routine(e)
+
+    @abstractmethod
+    def control_routine(self):
+        """Implements the running operation of the PLC-application.
+
+        Must be overridden in the PLC application class derived from this class.
+        """
+        ...
+
+    @abstractmethod
+    def exit_routine(self):
+        """Implements the routine that is called when the PLC-application is
+        to be stopped, i.e. when the user has pressed the key combination
+        <Ctrl-Z> on the keyboard of the PLC (Raspberry Pi).
+
+        Must be overridden in the PLC application class derived from this class.
+        """
+        ...
+
+    @abstractmethod
+    def emergency_routine(self):
+        """Implements the routine for when an `EmergencyException` has been 
+        raised. An `EmergencyException` can be raised anywhere within the
+        `control_routine` method to signal an emergency situation for which the
+        PLC application must be terminated.
+
+        Must be overridden in the PLC application class derived from this class.
+        """
+        ...
+
+    @abstractmethod
+    def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
+        """Handles unexpected runtime exceptions.
+
+        Must be overridden in the PLC application class derived from this class.
+        """
+        ...
+    
     def add_digital_input(
         self,
         pin: str | int,
@@ -381,120 +498,117 @@ class AbstractPLC(ABC):
         else:
             raise ConfigurationError(f"unknown PWM output `{label}`")
     
-    def read_inputs(self) -> None:
-        """Reads all the physical inputs defined in the PLC application 
-        and writes their current states in their respective input registries.
+    def _setup_shared_data(self) -> None:
+        self.hmi_input_registry = {
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            for name, init_value in self.shared_data.hmi_buttons.items()
+        }
+        self.hmi_input_registry.update({
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            for name, init_value in self.shared_data.hmi_switches.items()
+        })
+        self.hmi_input_registry.update({
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            for name, init_value in self.shared_data.hmi_analog_inputs.items()
+        })
+        self.hmi_output_registry = {
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            for name, init_value in self.shared_data.hmi_outputs.items()
 
-        Raises an `InternalCommunicationError` exception when a read operation
-        fails.
+        }
+        self.hmi_data = {
+            name: obj
+            for name, obj in self.shared_data.hmi_data.items()
+        }
+    
+    def _read_inputs(self) -> None:
+        """Reads all physical inputs (defined in the PLC application) and writes 
+        their current states to the PLC input register.
+        
+        If an HMI is connected to the PLC application (`shared_data` is not 
+        `None`) also updates the memory variables in the HMI input register
+        from the shared data object.
+        
+        Raises
+        ------
+        `InternalCommunicationError` when a read operation fails.
         """
         try:
             for input_ in self._inputs.values():
                 self.input_registry[input_.label].update(input_.read())
-            for output in self._outputs.values():
-                self.input_registry[f"{output.label}_status"].update(output.read())
         except InternalCommunicationError as error:
-            self.int_com_error_handler(error)
+            self._int_com_error_handler(error)
+        
+        if self.shared_data: self._read_hmi_inputs()
+    
+    def _read_hmi_inputs(self) -> None:
+        for name, value in self.shared_data.hmi_buttons.items():
+            self.hmi_input_registry[name].update(value)
+            if isinstance(value, bool):
+                self.shared_data.hmi_buttons[name] = False
 
-    def write_outputs(self) -> None:
-        """Writes all the current states in the output registries to their 
+        for name, value in self.shared_data.hmi_switches.items():
+            self.hmi_input_registry[name].update(value)
+
+        for name, value in self.shared_data.hmi_analog_inputs.items():
+            self.hmi_input_registry[name].update(value)
+    
+    def _write_outputs(self) -> None:
+        """Writes all current states in the PLC output register to the 
         corresponding physical outputs.
-
-        Raises an `InternalCommunicationError` exception when a write operation
-        fails.
+        
+        If an HMI is connected to the PLC application (`shared_data` is not 
+        `None`) writes the current states in the HMI output register to
+        the shared data object.
+        
+        Raises
+        ------
+        `InternalCommunicationError` when a write operation fails.
         """
         try:
             for output in self._outputs.values():
                 output.write(self.output_registry[output.label].curr_state)
         except InternalCommunicationError as error:
-            self.int_com_error_handler(error)
+            self._int_com_error_handler(error)
+        
+        if self.shared_data: self._write_hmi_outputs()
     
-    def update_registries(self):
-        """At the beginning of each new scan cycle the values in the 
-        current state location of the memory variables and output variables are
-        moved to the previous state location. This allows for edge detection.
+    def _write_hmi_outputs(self) -> None:
+        for name, mem_var in self.hmi_output_registry.items():
+            self.shared_data.hmi_outputs[name] = mem_var.curr_state
+    
+    def _update_previous_states(self):
+        """At the start of each new PLC scan cycle, the values in the 
+        "current state" location of marker and output variables are moved to the 
+        "previous state" location. This allows for edge detection on these 
+        variables.
         """
         for marker in self.marker_registry.values():
             marker.update(marker.curr_state)
+        
         for output in self.output_registry.values():
             output.update(output.curr_state)
+        
+        if self.shared_data: self._update_hmi_previous_states()
     
-    def int_com_error_handler(self, error: InternalCommunicationError):
+    def _update_hmi_previous_states(self) -> None:
+        for output in self.hmi_output_registry.values():
+            output.update(output.curr_state)
+    
+    def _int_com_error_handler(self, error: InternalCommunicationError):
         """Handles an `InternalCommunication` exception. An error message is
         sent to the logger. If the email notification service is used, an email
-        is sent with the error message. Finally, the PLC application is
-        terminated.
+        is sent with the error message. Finally, method `crash_routine()` is 
+        called and the PLC application will be terminated.
         """
         msg = f"program interrupted: {error.description}"
         self.logger.error(msg)
         if self.eml_notification: self.eml_notification.send(msg)
-        sys.exit(msg)
+        raise InternalCommunicationError
 
-    def exit_handler(self):
+    def _exit_handler(self):
         """Terminates the PLC scanning loop when the user has pressed the key
         combination <Ctrl-Z> on the keyboard of the PLC (Raspberry Pi) to stop
         the PLC application.
         """
         self._exit = True
-
-    @abstractmethod
-    def control_routine(self):
-        """Implements the running operation of the PLC-application.
-
-        Must be overridden in the PLC application class derived from this class.
-        """
-        ...
-
-    @abstractmethod
-    def exit_routine(self):
-        """Implements the routine that is called when the PLC-application is
-        to be stopped, i.e. when the user has pressed the key combination
-        <Ctrl-Z> on the keyboard of the PLC (Raspberry Pi).
-
-        Must be overridden in the PLC application class derived from this class.
-        """
-        ...
-
-    @abstractmethod
-    def emergency_routine(self):
-        """Implements the routine for when an `EmergencyException` has been 
-        raised. An `EmergencyException` can be raised anywhere within the
-        `control_routine` method to signal an emergency situation for which the
-        PLC application must be terminated.
-
-        Must be overridden in the PLC application class derived from this class.
-        """
-        ...
-
-    @abstractmethod
-    def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        """Handles unexpected runtime exceptions."""
-        pass
-
-    def run(self):
-        """Implements the global running operation of the PLC."""
-        try:
-            while not self._exit:
-                try:
-                    self.update_registries()
-                    self.read_inputs()
-                    self.control_routine()
-                except EmergencyException:
-                    self.logger.warning("Emergency stop triggered.")
-                    self.emergency_routine()
-                    return
-                finally:
-                    self.write_outputs()
-            else:
-                self.exit_routine()
-                self.write_outputs()
-        except KeyboardInterrupt as e:
-            self.logger.warning(
-                "KeyboardInterrupt received — invoking crash routine."
-            )
-            self.crash_routine(e)
-        except Exception as e:
-            self.logger.exception(
-                "Unexpected exception occurred — invoking crash routine."
-            )
-            self.crash_routine(e)

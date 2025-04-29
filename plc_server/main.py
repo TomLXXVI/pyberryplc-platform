@@ -1,97 +1,79 @@
-# Start plc server with: 
-# uvicorn plc_server.main:app --host 0.0.0.0 --port 8000 --reload
+import sys
+if (path := "/shared/python-projects/pyberryplc-platform") not in sys.path:
+    sys.path.append(path)
 
-import os
-import asyncio
-import logging
+import time
 import random
+import logging
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from fastapi import WebSocket, WebSocketDisconnect
+from pyberryplc.core import SharedData, AbstractPLC
+from plc_server.plc_server_framework import PLCServer
 
-logger = logging.getLogger("uvicorn")
 
-app = FastAPI()
+shared_data = SharedData(
+    hmi_buttons={"start_motion": False},
+    hmi_switches={"enable_system": False},
+    hmi_analog_inputs={"speed_setpoint": 0.0},
+    hmi_outputs={"motor_running": False, "alarm_active": False, "plc_fault": False},
+    hmi_data={}
+)
 
-# Shared motion profile settings
-class MotionProfile(BaseModel):
-    dt_acc: float
-    dt_tot: float
-    ds_tot: float
 
-motion_profile = MotionProfile(dt_acc=0.5, dt_tot=2.0, ds_tot=100.0)
-start_requested = False
-motor_running = False
-alarm_active = False
+class StepperHMIControlledPLC(AbstractPLC):
+    """Concrete PLC that reacts to HMI commands to start motor simulation."""
 
-@app.get("/ping")
-async def ping():
-    """Simple endpoint to test if server is alive."""
-    return {"message": "pong"}
+    def __init__(self, shared_data: SharedData, logger: logging.Logger) -> None:
+        super().__init__(scan_time=0.1, shared_data=shared_data, logger=logger)
+        self._motor_timer_start: float = 0.0
+        self._motor_duration: float = 5.0
+        self._motor_running_internal: bool = False
 
-@app.post("/set_profile")
-async def set_profile(profile: MotionProfile):
-    """Receive motion profile settings from HMI."""
-    global motion_profile
-    motion_profile = profile
-    logger.info(f"Received new profile: {motion_profile}")
-    return {"status": "profile updated"}
+    def control_routine(self) -> None:
+        """Process HMI input commands and simulate motor behavior."""
+        # Check if HMI command 'start_motion' is activated
+        if self.hmi_input_registry["start_motion"].rising_edge:
+            self.logger.info('Motor started.')
+            self._start_motor()
 
-@app.post("/start_motion")
-async def start_motion():
-    """Trigger the PLC to start motion."""
-    global start_requested, motor_running
-    start_requested = True
-    motor_running = True
-    logger.info("Start motion requested")
-    
-    async def simulate_motion():
-        global motor_running, alarm_active
-        await asyncio.sleep(10)
-        motor_running = False
-        
-        if random.random() < 0.5:
-            alarm_active = True
-            logger.warning("ALARM triggered: Overload!")
+        if self._motor_running_internal:
+            elapsed = time.monotonic() - self._motor_timer_start
+            if elapsed >= self._motor_duration:
+                self._stop_motor()
+
+    def _start_motor(self) -> None:
+        """Internal method to start motor simulation."""
+        self._motor_timer_start = time.monotonic()
+        self._motor_running_internal = True
+        self.hmi_output_registry["motor_running"].update(True)
+
+    def _stop_motor(self) -> None:
+        """Internal method to stop motor simulation and possibly trigger alarm."""
+        self._motor_running_internal = False
+        self.hmi_output_registry["motor_running"].update(False)
+
+        # Simuleer alarm met 20% kans
+        if random.random() < 0.8:
+            self.hmi_output_registry["alarm_active"].update(True)
+            raise RuntimeError
         else:
-            alarm_active = False
-            logger.info("Motion finished normally.")
+            self.hmi_output_registry["alarm_active"].update(False)
+
+    def exit_routine(self):
+        pass
+
+    def emergency_routine(self):
+        pass
+
+    def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
+        self.logger.critical("PLC crashed!!!")
+
+
+if __name__ == '__main__':
     
-    asyncio.create_task(simulate_motion())
-    return {"status": "start requested"}
-
-@app.get("/status")
-async def status():
-    """Provide full status back to HMI."""
-    return {
-        "motion_profile": motion_profile,
-        "start_requested": start_requested,
-        "motor_running": motor_running,
-        "alarm_active": alarm_active
-    }
-
-# Serve static files
-app.mount("/static", StaticFiles(directory="hmi_client/static"), name="static")
-
-@app.get("/")
-async def get_index():
-    """Serve the index.html page."""
-    return FileResponse(os.path.join("hmi_client", "templates", "index.html"))
-
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    try:
-        while True:
-            status_message = {
-                "motor_running": motor_running,
-                "alarm_active": alarm_active
-            }
-            await websocket.send_json(status_message)
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        logger.info("WebSocket connection closed")
+    uvicorn_logger = logging.getLogger("uvicorn")
+    
+    plc = StepperHMIControlledPLC(shared_data=shared_data, logger=uvicorn_logger)
+    
+    server = PLCServer(shared_data=shared_data, plc_instance=plc)
+    server.start_plc()
+    server.run_server()

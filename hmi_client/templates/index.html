@@ -7,59 +7,86 @@
         body { font-family: Arial, sans-serif; margin: 2rem; }
         label, input, button { display: block; margin: 0.5rem 0; }
         #status { margin-top: 1rem; font-weight: bold; }
+
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+        #alarm {
+            display: none;
+            font-size: 24px;
+            font-weight: bold;
+            color: red;
+            animation: blink 1s infinite;
+        }
     </style>
 </head>
 <body>
     <h1>pyberryplc HMI</h1>
 
-    <h2>Motion Profile</h2>
-    <label>Acceleration Time (s):
-        <input type="number" step="0.01" id="dt_acc" value="0.5">
-    </label>
-    <label>Total Duration (s):
-        <input type="number" step="0.01" id="dt_tot" value="2.0">
-    </label>
-    <label>Total Displacement (degrees):
-        <input type="number" step="1" id="ds_tot" value="100">
-    </label>
-    <button id="set_profile_btn">Set Profile</button>
+    <div id="alarm">ALARM ACTIVE!</div>
+    <div id="plc_fault" style="display:none; font-size:24px; font-weight:bold; color:red;">
+        PLC FAULT DETECTED!
+    </div>
 
-    <h2>Actions</h2>
-    <button id="start_motion_btn">Start Motion</button>
-    <button id="get_status_btn">Get Status</button>
+    <h2>Controls</h2>
+    <button id="start_motion" onclick="sendButtonPress('start_motion')">Start Motion</button>
+    <label>Enable System:
+        <input type="checkbox" onchange="sendSwitchChange('enable_system', this.checked)">
+    </label>
+    <label>Speed Setpoint:
+        <input type="number" id="speed_setpoint" onchange="sendAnalogInput('speed_setpoint', this.value)">
+    </label>
 
-    <div id="status">Status: Unknown</div>
+    <div id="status">Status: Loading...</div>
 
     <script>
         const baseUrl = "http://" + window.location.hostname + ":8000";
 
-        document.getElementById("set_profile_btn").addEventListener("click", async () => {
-            const dt_acc = parseFloat(document.getElementById("dt_acc").value);
-            const dt_tot = parseFloat(document.getElementById("dt_tot").value);
-            const ds_tot = parseInt(document.getElementById("ds_tot").value);
+        async function sendButtonPress(name) {
+            try {
+                const response = await fetch(baseUrl + "/set_button", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name })
+                });
+                const result = await response.json();
+                console.log("Button Press Sent:", result);
 
-            const response = await fetch(baseUrl + "/set_profile", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ dt_acc, dt_tot, ds_tot })
-            });
-            const result = await response.json();
-            alert("Profile Updated: " + JSON.stringify(result));
-        });
+                const buttonElement = document.getElementById(name);
+                if (buttonElement) {
+                    buttonElement.disabled = true;
+                    setTimeout(() => buttonElement.disabled = false, 500);
+                }
+            } catch (error) {
+                console.error("Failed to send button press:", error);
+            }
+        }
 
-        document.getElementById("start_motion_btn").addEventListener("click", async () => {
-            const response = await fetch(baseUrl + "/start_motion", { method: "POST" });
-            const result = await response.json();
-            console.log("Start Requested:", result);
+        async function sendSwitchChange(name, value) {
+            try {
+                await fetch(baseUrl + "/set_switch", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name, value: value })
+                });
+            } catch (error) {
+                console.error("Failed to send switch change:", error);
+            }
+        }
 
-            document.getElementById("status").textContent = "Status: Start Requested...";
-        });
-
-        document.getElementById("get_status_btn").addEventListener("click", async () => {
-            const response = await fetch(baseUrl + "/status");
-            const result = await response.json();
-            document.getElementById("status").textContent = "Status: " + JSON.stringify(result);
-        });
+        async function sendAnalogInput(name, value) {
+            try {
+                await fetch(baseUrl + "/set_analog_input", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: name, value: parseFloat(value) })
+                });
+            } catch (error) {
+                console.error("Failed to send analog input:", error);
+            }
+        }
 
         const ws = new WebSocket("ws://" + window.location.hostname + ":8000/ws");
 
@@ -69,20 +96,25 @@
 
         ws.onmessage = function(event) {
             const data = JSON.parse(event.data);
-            console.log("[WebSocket] Data received:", data);
+            document.getElementById("status").textContent = `Status: Motor Running: ${data.motor_running} | Alarm Active: ${data.alarm_active} | PLC Fault: ${data.plc_fault}`;
 
-            let statusText = "Motor running: " + data.motor_running + " | Alarm active: " + data.alarm_active;
-            document.getElementById("status").textContent = "Status: " + statusText;
+            const alarmDiv = document.getElementById("alarm");
+            alarmDiv.style.display = data.alarm_active ? "block" : "none";
+
+            const plcFaultDiv = document.getElementById("plc_fault");
+            if (plcFaultDiv) {
+                plcFaultDiv.style.display = data.plc_fault ? "block" : "none";
+            }
         };
 
-        ws.onclose = function(event) {
-            console.log("[WebSocket] Disconnected from server");
+        ws.onclose = function() {
+            console.log("[WebSocket] Disconnected");
         };
 
         ws.onerror = function(error) {
             console.error("[WebSocket] Error:", error);
         };
-
     </script>
 </body>
 </html>
+
