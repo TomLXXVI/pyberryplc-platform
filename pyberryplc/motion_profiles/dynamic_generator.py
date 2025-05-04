@@ -1,10 +1,4 @@
-from __future__ import annotations
-from typing import TYPE_CHECKING
-import logging
-
 from .motion_profile import MotionProfile
-if TYPE_CHECKING:
-    from pyberryplc.stepper import StepperMotor
 
 
 class DynamicDelayGenerator:
@@ -22,13 +16,11 @@ class DynamicDelayGenerator:
     """
     def __init__(
         self, 
-        stepper: StepperMotor, 
+        step_angle: float, 
         profile: MotionProfile,
-        logger: logging.Logger | None = None
     ) -> None:
         self.profile = profile
-        self.step_angle = stepper.step_angle
-        self.logger = logger or logging.getLogger(__name__)
+        self.step_angle = step_angle
 
         self.s = 0.0  # current position (deg)
         self.t = 0.0  # current time (s)

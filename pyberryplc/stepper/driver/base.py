@@ -31,9 +31,6 @@ The base class also handles:
 - GPIO-based direction and enable control
 - Step timing using monotonic timestamps
 
-Non-blocking motion execution must be driven by periodic calls to 
-`do_single_step()` from a PLC scan cycle or real-time loop.
-
 This class is intended to be subclassed by concrete driver implementations
 (e.g., A4988, TMC2208) that provide hardware-specific microstepping logic.
 """
@@ -42,6 +39,7 @@ import time
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
+import threading
 
 from pyberryplc.core.gpio import DigitalOutput
 from pyberryplc.motion_profiles import MotionProfile, DynamicDelayGenerator
@@ -66,6 +64,23 @@ class StepperMotor(ABC):
         "1/128": 128,
         "1/256": 256
     }
+
+    class _StepperThread(threading.Thread):
+        """Control non-blocking rotation movement in a separate thread 
+        independent of the PLC scan time.
+        """
+        def __init__(self, motor: "StepperMotor"):
+            super().__init__(daemon=True)
+            self.motor = motor
+            self._stop_flag = threading.Event()
+
+        def run(self):
+            while not self._stop_flag.is_set():
+                self.motor._do_single_step()
+                time.sleep(0.001)
+
+        def stop(self):
+            self._stop_flag.set()
 
     def __init__(
         self,
@@ -118,7 +133,8 @@ class StepperMotor(ABC):
         self._next_step_time = 0.0
         self._delays = deque()
         
-        self._dynamic_generator = None
+        self._dynamic_generator: DynamicDelayGenerator | None = None
+        self._rotation_thread = None
 
     def enable(self) -> None:
         """Enable the stepper driver (if EN pin is defined)."""
@@ -230,31 +246,6 @@ class StepperMotor(ABC):
             self._pulse_step_pin()
             time.sleep(delay)
 
-    def rotate_dynamic(
-        self, 
-        generator: DynamicDelayGenerator, 
-        direction: str = "forward"
-    ) -> None:
-        """Rotate the motor using a dynamic motion profile.
-
-        The motion is controlled in real-time by a delay generator that responds
-        to external triggers for deceleration.
-
-        Parameters
-        ----------
-        generator : DynamicDelayGenerator
-            Dynamic delay generator for real-time profile evaluation.
-        direction : str, optional
-            Either "forward" or "backward". Default is "forward".
-        """
-        self._set_direction(direction)
-        try:
-            while True:
-                self._pulse_step_pin()
-                time.sleep(generator.next_delay() - self.step_width)
-        except StopIteration:
-            return
-
     def start_rotation_fixed(
         self, 
         angle: float, 
@@ -262,8 +253,9 @@ class StepperMotor(ABC):
         direction: str = "forward"
     ) -> None:
         """Start a non-blocking fixed-angle rotation at constant speed.
-
-        This must be used together with `do_single_step()` in the scan cycle.
+        
+        When this method is called, property `busy` of the `StepperMotor` object
+        is set to `True` indicating that the motor is rotating.
 
         Parameters
         ----------
@@ -280,16 +272,18 @@ class StepperMotor(ABC):
         self._delays = deque([delay] * total_steps)
         self._busy = True
         self._next_step_time = time.time()
-
+        self._start_thread()
+        
     def start_rotation_profile(
         self, 
         profile: MotionProfile, 
         direction: str = "forward"
     ) -> None:
         """Start a non-blocking rotation using a static motion profile.
-
-        This must be used together with `do_single_step()` in the scan cycle.
-
+        
+        When this method is called, property `busy` of the `StepperMotor` object
+        is set to `True` indicating that the motor is rotating.
+        
         Parameters
         ----------
         profile : MotionProfile
@@ -309,67 +303,78 @@ class StepperMotor(ABC):
         self._delays = deque(delays)
         self._busy = True
         self._next_step_time = time.time()
+        self._start_thread()
 
     def start_rotation_dynamic(
         self, 
-        generator: DynamicDelayGenerator, 
+        profile: MotionProfile, 
         direction: str = "forward"
     ) -> None:
-        """Start a non-blocking rotation using a dynamic motion profile.
-
-        This must be used together with `do_single_step()` in the scan cycle.
-
+        """Start a non-blocking rotation using a dynamic motion profile (the
+        stop time of the rotation is not known in advance).
+        
+        When this method is called, property `busy` of the `StepperMotor` object
+        is set to `True` indicating the motor is rotating.
+        
+        To stop the motor, call method `stop_rotation_dynamic()`.
+        
         Parameters
         ----------
-        generator : DynamicDelayGenerator
-            Real-time delay generator object.
+        profile : MotionProfile
+            Motion profile from which the acceleration and deceleration phase
+            of the motor will be determined.
         direction : str, optional
             Either "forward" or "backward". Default is "forward".
         """
         self._set_direction(direction)
-        self._dynamic_generator = generator
+        self._dynamic_generator = DynamicDelayGenerator(self.step_angle, profile)
         self._delays = None
         self._busy = True
         self._next_step_time = time.time()
-
-    def do_single_step_dynamic(self) -> None:
-        """Perform one step of a dynamic non-blocking motion if timing is right.
-
-        This should be called cyclically during the scan.
-        """
-        if not self._busy or not hasattr(self, '_dynamic_generator'):
+        self._start_thread()
+    
+    def stop_rotation_dynamic(self) -> None:
+        if self._dynamic_generator is not None:
+            self._dynamic_generator.trigger_decel()
+    
+    def _start_thread(self):
+        """Start the non-blocking rotation running inside a separate thread."""
+        if self._rotation_thread and self._rotation_thread.is_alive():
             return
-
-        now = time.time()
-        if now >= self._next_step_time:
-            try:
-                self._pulse_step_pin()
-                delay = self._dynamic_generator.next_delay() - self.step_width
-                self._next_step_time = now + delay
-            except StopIteration:
-                self.logger.info("Motion complete.")
-                self._busy = False
-                self._dynamic_generator = None
-
-    def do_single_step(self) -> None:
+        self._rotation_thread = self._StepperThread(self)
+        self._rotation_thread.start()
+    
+    def _do_single_step(self) -> None:
         """Perform one step of a non-blocking motion if timing is right.
-
-        Internally dispatches to dynamic or static handler.
+        
+        This method is called from inside the running rotation thread.
+        When the rotation is finished, property `busy` of the `StepperMotor` 
+        object will be set to `False` and the rotation thread will be stopped.
         """
+        if self._dynamic_generator is not None:
+            now = time.time()
+            if now >= self._next_step_time:
+                try:
+                    self._pulse_step_pin()
+                    delay = self._dynamic_generator.next_delay() - self.step_width
+                    self._next_step_time = now + delay
+                except StopIteration:
+                    self.logger.info("Motion complete.")
+                    self._busy = False
+                    self._dynamic_generator = None
+        else:
+            now = time.time()
+            if now >= self._next_step_time and self._delays:
+                self._pulse_step_pin()
+                self._next_step_time = now + self._delays.popleft()
+                if not self._delays:
+                    self.logger.info("Motion complete.")
+                    self._busy = False
         if not self._busy:
-            return
-
-        if hasattr(self, '_dynamic_generator') and self._dynamic_generator:
-            self.do_single_step_dynamic()
-            return
-
-        now = time.time()
-        if now >= self._next_step_time and self._delays:
-            self._pulse_step_pin()
-            self._next_step_time = now + self._delays.popleft()
-            if not self._delays:
-                self._busy = False
-
+            if self._rotation_thread:
+                self._rotation_thread.stop()
+                self._rotation_thread = None
+        
     def _pulse_step_pin(self) -> None:
         """Generate a single pulse on the STEP pin."""
         self.step.write(True)

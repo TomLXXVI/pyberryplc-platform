@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyberryplc"
+version = "0.1.0"
+description = "PLC programming framework for Raspberry Pi"
+authors = [{ name = "Tom Christiaens", email = "mailbox.tom.chr@gmail.com" }]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Embedded Systems"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]

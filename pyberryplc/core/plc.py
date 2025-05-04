@@ -170,33 +170,34 @@ class AbstractPLC(ABC):
         """
         self.scan_time = scan_time
         self.shared_data = shared_data
-        
         self.pin_factory = pin_factory
+        self._exit: bool = False
         
-        # Attaches the e-mail notification service (can be None).
+        # Attaches an e-mail notification service (can be None).
         self.eml_notification = eml_notification
 
-        # Attaches a logger to the PLC application (the logger can be configured
-        # by calling the function `init_logger()` in module `/utils/log_utils.py`
-        # at the start of the main program).
+        # Attaches a logger to the PLC application (note: the logger can be 
+        # configured by calling the function `init_logger()` in module 
+        # `/utils/log_utils.py` at the start of the main program).
         self.logger = logger if logger else logging.getLogger(__name__)
 
-        # Dictionaries that hold the inputs/outputs used by the PLC application.
+        # Dictionaries that hold the physical GPIO inputs/outputs used by the 
+        # PLC application.
         self._inputs: dict[str, GPIO] = {}
         self._outputs: dict[str, GPIO] = {}
         
         # Dictionaries where the states of inputs/outputs are stored. These are
         # the memory registries of the PLC. The program logic reads from or 
         # writes to these registries.
-        self.input_registry: dict[str, MemoryVariable] = {}
-        self.output_registry: dict[str, MemoryVariable] = {}
-        self.marker_registry: dict[str, MemoryVariable] = {}
+        self.input_register: dict[str, MemoryVariable] = {}
+        self.output_register: dict[str, MemoryVariable] = {}
+        self.marker_register: dict[str, MemoryVariable] = {}
         
         # Dictionaries where the states of HMI inputs/outputs, and where other 
         # data from the HMI are stored, if an HMI is connected to the PLC 
         # application: 
-        self.hmi_input_registry: dict[str, MemoryVariable] = {}
-        self.hmi_output_registry: dict[str, MemoryVariable] = {}
+        self.hmi_input_register: dict[str, MemoryVariable] = {}
+        self.hmi_output_register: dict[str, MemoryVariable] = {}
         self.hmi_data: dict[str, Any] = {}
         
         if shared_data: self._setup_shared_data()
@@ -205,7 +206,6 @@ class AbstractPLC(ABC):
         # called which terminates the PLC scanning loop.
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
-        self._exit: bool = False
 
     def run(self):
         """Implements the global running operation of the PLC."""
@@ -250,7 +250,7 @@ class AbstractPLC(ABC):
             self.crash_routine(e)  # to be implemented in derived class
 
         except Exception as e:
-            self.logger.exception(
+            self.logger.error(
                 "Unexpected exception occurred — invoking crash routine."
             )
             self.crash_routine(e)
@@ -328,11 +328,11 @@ class AbstractPLC(ABC):
             pull_up=None, 
             active_state=active_state
         )
-        self.input_registry[label] = MemoryVariable(
+        self.input_register[label] = MemoryVariable(
             curr_state=init_value,
             prev_state=init_value
         )
-        return self.input_registry[label]
+        return self.input_register[label]
 
     def add_digital_output(
         self,
@@ -370,14 +370,14 @@ class AbstractPLC(ABC):
             self.pin_factory,
             init_value
         )
-        self.output_registry[label] = MemoryVariable(
+        self.output_register[label] = MemoryVariable(
             curr_state=init_value,
             prev_state=init_value
         )
-        self.input_registry[f"{label}_status"] = MemoryVariable()
+        self.input_register[f"{label}_status"] = MemoryVariable()
         return (
-            self.output_registry[label], 
-            self.input_registry[f"{label}_status"]
+            self.output_register[label], 
+            self.input_register[f"{label}_status"]
         )
     
     def add_pwm_output(
@@ -430,18 +430,18 @@ class AbstractPLC(ABC):
             pin, label, self.pin_factory, init_value, frame_width, 
             min_pulse_width, max_pulse_width, min_value, max_value
         )
-        self.output_registry[label] = MemoryVariable(
+        self.output_register[label] = MemoryVariable(
             curr_state=init_value,
             prev_state=init_value,
             single_bit=False
         )
-        self.input_registry[f"{label}_status"] = MemoryVariable(
+        self.input_register[f"{label}_status"] = MemoryVariable(
             single_bit=False,
             decimal_precision=decimal_precision
         )
         return (
-            self.output_registry[label],
-            self.input_registry[f"{label}_status"]
+            self.output_register[label],
+            self.input_register[f"{label}_status"]
         )
     
     def add_marker(self, label: str, init_value: bool | int = 0) -> MemoryVariable:
@@ -452,7 +452,7 @@ class AbstractPLC(ABC):
             curr_state=init_value,
             prev_state=init_value
         )
-        self.marker_registry[label] = marker
+        self.marker_register[label] = marker
         return marker
 
     def di_read(self, label: str) -> bool:
@@ -499,19 +499,22 @@ class AbstractPLC(ABC):
             raise ConfigurationError(f"unknown PWM output `{label}`")
     
     def _setup_shared_data(self) -> None:
-        self.hmi_input_registry = {
+        """If a `SharedData` object is passed to `AbstractPLC.__init__(), 
+        creates the HMI input and output registers.
+        """
+        self.hmi_input_register = {
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
             for name, init_value in self.shared_data.hmi_buttons.items()
         }
-        self.hmi_input_registry.update({
+        self.hmi_input_register.update({
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
             for name, init_value in self.shared_data.hmi_switches.items()
         })
-        self.hmi_input_registry.update({
+        self.hmi_input_register.update({
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
             for name, init_value in self.shared_data.hmi_analog_inputs.items()
         })
-        self.hmi_output_registry = {
+        self.hmi_output_register = {
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
             for name, init_value in self.shared_data.hmi_outputs.items()
 
@@ -535,7 +538,7 @@ class AbstractPLC(ABC):
         """
         try:
             for input_ in self._inputs.values():
-                self.input_registry[input_.label].update(input_.read())
+                self.input_register[input_.label].update(input_.read())
         except InternalCommunicationError as error:
             self._int_com_error_handler(error)
         
@@ -543,15 +546,15 @@ class AbstractPLC(ABC):
     
     def _read_hmi_inputs(self) -> None:
         for name, value in self.shared_data.hmi_buttons.items():
-            self.hmi_input_registry[name].update(value)
+            self.hmi_input_register[name].update(value)
             if isinstance(value, bool):
                 self.shared_data.hmi_buttons[name] = False
 
         for name, value in self.shared_data.hmi_switches.items():
-            self.hmi_input_registry[name].update(value)
+            self.hmi_input_register[name].update(value)
 
         for name, value in self.shared_data.hmi_analog_inputs.items():
-            self.hmi_input_registry[name].update(value)
+            self.hmi_input_register[name].update(value)
     
     def _write_outputs(self) -> None:
         """Writes all current states in the PLC output register to the 
@@ -567,14 +570,14 @@ class AbstractPLC(ABC):
         """
         try:
             for output in self._outputs.values():
-                output.write(self.output_registry[output.label].curr_state)
+                output.write(self.output_register[output.label].curr_state)
         except InternalCommunicationError as error:
             self._int_com_error_handler(error)
         
         if self.shared_data: self._write_hmi_outputs()
     
     def _write_hmi_outputs(self) -> None:
-        for name, mem_var in self.hmi_output_registry.items():
+        for name, mem_var in self.hmi_output_register.items():
             self.shared_data.hmi_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
@@ -583,16 +586,16 @@ class AbstractPLC(ABC):
         "previous state" location. This allows for edge detection on these 
         variables.
         """
-        for marker in self.marker_registry.values():
+        for marker in self.marker_register.values():
             marker.update(marker.curr_state)
         
-        for output in self.output_registry.values():
+        for output in self.output_register.values():
             output.update(output.curr_state)
         
         if self.shared_data: self._update_hmi_previous_states()
     
     def _update_hmi_previous_states(self) -> None:
-        for output in self.hmi_output_registry.values():
+        for output in self.hmi_output_register.values():
             output.update(output.curr_state)
     
     def _int_com_error_handler(self, error: InternalCommunicationError):
