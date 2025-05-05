@@ -16,8 +16,7 @@ class AbstractHMI(ABC):
     Abstract base class for a NiceGUI-based HMI.
 
     This class defines the interface and common functionality shared by all
-    concrete HMI implementations, including automatic timers for status and
-    log updates, and optional dialog and PLC integration.
+    concrete HMI implementations.
     """
 
     def __init__(
