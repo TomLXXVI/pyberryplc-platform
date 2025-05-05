@@ -2,18 +2,14 @@ from nicegui import ui
 from pathlib import Path
 from pyberryplc.core.shared_data import SharedData
 
-shared_data: SharedData | None = None  # will be injected externally
-
 def create_ui(shared: SharedData):
-    global shared_data
-    shared_data = shared
 
     ui.label("Stepper Motor HMI").classes("text-2xl font-bold")
 
     with ui.row():
-        ui.button("Start motor left", on_click=lambda: shared_data.hmi_buttons.update({"start_motor_left": True}))
-        ui.button("Start motor right", on_click=lambda: shared_data.hmi_buttons.update({"start_motor_right": True}))
-        ui.button("Stop motor", on_click=lambda: shared_data.hmi_buttons.update({"stop_motor": True}))
+        ui.button("Start motor left", on_click=lambda: shared.hmi_buttons.update({"start_motor_left": True}))
+        ui.button("Start motor right", on_click=lambda: shared.hmi_buttons.update({"start_motor_right": True}))
+        ui.button("Stop motor", on_click=lambda: shared.hmi_buttons.update({"stop_motor": True}))
 
     status_label = ui.label()
     fault_label = ui.label().classes("text-red-600 font-bold")
@@ -26,21 +22,21 @@ def create_ui(shared: SharedData):
         ui.label("⚠️ A critical PLC error has occurred. Please check the log for details.").classes("text-red-600 font-bold")
         with ui.row().classes("mt-4 justify-end"):
             ui.button("Dismiss", on_click=error_dialog.close)
-            ui.button("Restart PLC", color="red", on_click=lambda: shared_data.restart_callback())
+            ui.button("Restart PLC", color="red", on_click=lambda: shared.restart_callback())
 
     # Expose dialog to the rest of the system
     shared.dialog = error_dialog
 
     def update_status():
-        motor_on = shared_data.hmi_outputs.get("motor_running", False)
+        motor_on = shared.hmi_outputs.get("motor_running", False)
         status_label.text = f"Motor is {'running' if motor_on else 'stopped'}"
 
-        if shared_data.hmi_outputs.get("plc_fault"):
+        if shared.hmi_outputs.get("plc_fault"):
             fault_label.text = "⚠️ PLC fault detected"
         else:
             fault_label.text = ""
 
-        if shared_data.hmi_outputs.get("plc_restarted"):
+        if shared.hmi_outputs.get("plc_restarted"):
             restart_label.text = "✅ PLC restarted successfully"
         else:
             restart_label.text = ""

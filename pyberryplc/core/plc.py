@@ -254,7 +254,10 @@ class AbstractPLC(ABC):
                 "Unexpected exception occurred — invoking crash routine."
             )
             self.crash_routine(e)
-
+    
+    def exit(self):
+        self._exit_handler()
+    
     @abstractmethod
     def control_routine(self):
         """Implements the running operation of the PLC-application.

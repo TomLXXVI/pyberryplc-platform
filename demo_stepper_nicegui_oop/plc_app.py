@@ -83,12 +83,17 @@ class StepperMotorPLC(AbstractPLC):
         self._update_statuses()
     
     def exit_routine(self):
-        self.logger.info("Exiting PLC routine. Shutting down hardware.")
+        self.logger.info("Exiting PLC routine. Shutting down...")
         self.motor.disable()
+        self.motor = None
 
     def emergency_routine(self):
+        self.logger.warning("Emergency routine invoked. Shutting down...")
         self.motor.disable()
-
+        self.motor = None
+        
     def crash_routine(self, exception):
+        self.logger.error("PLC crash routine invoked. Shutting down...")
         self.motor.disable()
+        self.motor = None
         raise exception

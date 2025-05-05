@@ -144,9 +144,7 @@ class TMC2208StepperMotor(StepperMotor):
                 fields={"toff": 0}  # Driver disable, all bridges off
             )
             self.uart.close()
-            self.logger.info("Driver disabled")
-        else:
-            super().disable()
+        super().disable()
     
     def _validate_microstepping(self, microstep_resolution: str) -> tuple[str, int]:
         """

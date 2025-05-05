@@ -135,18 +135,22 @@ class StepperMotor(ABC):
         
         self._dynamic_generator: DynamicDelayGenerator | None = None
         self._rotation_thread = None
+        self._direction = ""
 
     def enable(self) -> None:
         """Enable the stepper driver (if EN pin is defined)."""
         if self._enable:
             self._enable.write(True)
-            self.logger.debug("Driver enabled")
+            self.logger.info("Driver enabled")
 
     def disable(self) -> None:
-        """Disable the stepper driver (if EN pin is defined)."""
+        """Disable the stepper driver."""
         if self._enable:
             self._enable.write(False)
-            self.logger.debug("Driver disabled")
+        self.step = None
+        self.dir = None
+        self._enable = None
+        self.logger.info("Driver disabled")
 
     @property
     def busy(self) -> bool:
@@ -359,7 +363,7 @@ class StepperMotor(ABC):
                     delay = self._dynamic_generator.next_delay() - self.step_width
                     self._next_step_time = now + delay
                 except StopIteration:
-                    self.logger.info("Motion complete.")
+                    self.logger.info(f"Motion {self._direction} completed.")
                     self._busy = False
                     self._dynamic_generator = None
         else:
@@ -368,7 +372,7 @@ class StepperMotor(ABC):
                 self._pulse_step_pin()
                 self._next_step_time = now + self._delays.popleft()
                 if not self._delays:
-                    self.logger.info("Motion complete.")
+                    self.logger.info(f"Motion {self._direction} completed.")
                     self._busy = False
         if not self._busy:
             if self._rotation_thread:
@@ -392,3 +396,4 @@ class StepperMotor(ABC):
         if direction not in ("forward", "backward"):
             raise ValueError("Direction must be 'forward' or 'backward'")
         self.dir.write(direction == "forward")
+        self._direction = direction
