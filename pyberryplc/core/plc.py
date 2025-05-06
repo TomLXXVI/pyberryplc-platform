@@ -235,8 +235,9 @@ class AbstractPLC(ABC):
                         time.sleep(sleep_time)
 
             else:
-                # `else` block is only executed when user has pressed <Ctrl-Z>
-                # to exit the program (`self._exit` has become `True`).
+                # `else` block is only executed when `self._exit` has become 
+                # `True`, not when while-loop is interrupted by 
+                # `EmergencyException`.
                 self.logger.info(
                     "Exiting PLC program — invoking exit routine."
                 )
@@ -256,6 +257,7 @@ class AbstractPLC(ABC):
             self.crash_routine(e)
     
     def exit(self):
+        """Terminates the PLC scanning loop and invokes `exit_routine()`."""
         self._exit_handler()
     
     @abstractmethod
@@ -584,8 +586,8 @@ class AbstractPLC(ABC):
             self.shared_data.hmi_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
-        """At the start of each new PLC scan cycle, the values in the 
-        "current state" location of marker and output variables are moved to the 
+        """At the start of each new PLC scan cycle, the value in the 
+        "current state" location of marker and output variables is moved to the 
         "previous state" location. This allows for edge detection on these 
         variables.
         """

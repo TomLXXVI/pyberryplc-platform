@@ -77,7 +77,7 @@ class StepperMotor(ABC):
         def run(self):
             while not self._stop_flag.is_set():
                 self.motor._do_single_step()
-                time.sleep(0.001)
+                # time.sleep(0.001)
 
         def stop(self):
             self._stop_flag.set()
@@ -272,7 +272,7 @@ class StepperMotor(ABC):
         """
         self._set_direction(direction)
         total_steps = int(angle * self.steps_per_degree)
-        delay = 1.0 / (angular_speed * self.steps_per_degree) - self.step_width
+        delay = 1.0 / (angular_speed * self.steps_per_degree)  # - self.step_width
         self._delays = deque([delay] * total_steps)
         self._busy = True
         self._next_step_time = time.time()
@@ -303,7 +303,8 @@ class StepperMotor(ABC):
             for i in range(int(final_angle / self.step_angle))
         ]
         times = list(map(profile.get_fn_time_from_position(), angles))
-        delays = [t2 - t1 - self.step_width for t1, t2 in zip(times, times[1:])]
+        # delays = [t2 - t1 - self.step_width for t1, t2 in zip(times, times[1:])]
+        delays = [t2 - t1 for t1, t2 in zip(times, times[1:])]
         self._delays = deque(delays)
         self._busy = True
         self._next_step_time = time.time()
@@ -360,12 +361,13 @@ class StepperMotor(ABC):
             if now >= self._next_step_time:
                 try:
                     self._pulse_step_pin()
-                    delay = self._dynamic_generator.next_delay() - self.step_width
+                    delay = self._dynamic_generator.next_delay()  # - self.step_width
                     self._next_step_time = now + delay
                 except StopIteration:
                     self.logger.info(f"Motion {self._direction} completed.")
                     self._busy = False
                     self._dynamic_generator = None
+        
         else:
             now = time.time()
             if now >= self._next_step_time and self._delays:
@@ -374,6 +376,7 @@ class StepperMotor(ABC):
                 if not self._delays:
                     self.logger.info(f"Motion {self._direction} completed.")
                     self._busy = False
+        
         if not self._busy:
             if self._rotation_thread:
                 self._rotation_thread.stop()

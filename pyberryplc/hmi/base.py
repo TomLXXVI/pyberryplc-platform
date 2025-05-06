@@ -46,7 +46,7 @@ class AbstractHMI(ABC):
             Port the HMI server is listening to. Default port is 8081.
         """
         self.title = title
-        self.shared = shared_data
+        self.shared_data = shared_data
         self._plc_class = plc_app
         self._plc_instance = None
         self.port = port
@@ -71,7 +71,7 @@ class AbstractHMI(ABC):
         self._last_log_snapshot: list[str] = []
 
     @abstractmethod
-    def build_ui(self):
+    def build_ui(self) -> None:
         """
         Build the HMI user interface.
 
@@ -80,7 +80,7 @@ class AbstractHMI(ABC):
         """
         pass
 
-    def update_status(self):
+    def update_status(self) -> None:
         """
         Update HMI status indicators.
 
@@ -89,7 +89,7 @@ class AbstractHMI(ABC):
         """
         pass
     
-    def setup_timers(self):
+    def setup_timers(self) -> None:
         """
         Start recurring timers for GUI updates.
 
@@ -117,7 +117,7 @@ class AbstractHMI(ABC):
         else:
             button.disable()
 
-    def run(self):
+    def run(self) -> None:
         """Launches the PLC and HMI applications."""
         # Build the HMI GUI.
         self._build_ui()
@@ -135,7 +135,7 @@ class AbstractHMI(ABC):
         if not self._plc_monitor_thread.is_alive():
             self._start_plc_monitor_thread()
 
-    def exit_hmi(self):
+    def exit_hmi(self) -> None:
         """Callback to cleanly close the PLC and HMI application."""
         # Close PLC app.
         self.logger.info("Clean exit PLC")
@@ -152,7 +152,7 @@ class AbstractHMI(ABC):
         # Close the HMI-app (and server) after 2 seconds.
         ui.timer(2.0, app.shutdown, once=True)
     
-    def abort_hmi(self):
+    def abort_hmi(self) -> None:
         """Callback to terminate the PLC and HMI application after a crash."""
         self.logger.warning("PLC operation aborted")
         app.shutdown()
@@ -164,7 +164,7 @@ class AbstractHMI(ABC):
         def _plc_thread_fn():
             try:
                 self._plc_instance = self._plc_class(
-                    shared_data=self.shared, 
+                    shared_data=self.shared_data, 
                     logger=self.logger
                 )
                 self._plc_instance.run()
@@ -241,7 +241,7 @@ class AbstractHMI(ABC):
             "w-full p-2 bg-white border rounded max-h-64 overflow-auto"
         ).props("id=log_area")
     
-    def _update_logs(self):
+    def _update_logs(self) -> None:
         """
         Display the latest lines of the PLC log in the log area.
         """
