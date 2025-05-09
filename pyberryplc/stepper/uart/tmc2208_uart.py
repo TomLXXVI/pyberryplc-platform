@@ -1,6 +1,8 @@
 from typing import Optional
 import serial
 import time
+import logging
+
 from .uart_registers import Register
 from .tmc2208_registers import (
     CHOPCONFRegister, 
@@ -46,13 +48,16 @@ class TMC2208UART:
         port: str,
         baudrate: int = 115200,
         timeout: float = 0.5,
-        slave_address: int = 0x00
+        slave_address: int = 0x00,
+        logger: logging.Logger | None = None
     ) -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.slave_address = slave_address
         self.serial: Optional[serial.Serial] = None
+        self.logger = logger or logging.getLogger(__name__)
+        self.name = ""
 
     def open(self) -> None:
         """
@@ -99,24 +104,7 @@ class TMC2208UART:
     def read_register_addr(self, reg_addr: int) -> int:
         """
         Sends a read request for the specified register and returns its value.
-        
-        This is a low-level function. For easier use, `read_register()`
-        is recommended. 
-
-        Parameters
-        ----------
-        reg_addr : int
-            Address of the register to read.
-
-        Returns
-        -------
-        int
-            32-bit register value.
-
-        Raises
-        ------
-        IOError
-            If communication fails or an invalid response is received.
+        Waits for sync byte (0x05), then reads 7 more bytes.
         """
         if not self.serial or not self.serial.is_open:
             raise IOError("Serial port is not open.")
@@ -124,17 +112,29 @@ class TMC2208UART:
         request = [0x05, self.slave_address, reg_addr & 0x7F]
         request.append(self._calculate_crc(request))
 
-        self.serial.reset_input_buffer()   # clear RX-buffer
-        self.serial.write(bytes(request))  # write request
-        self.serial.flush()                # send full request
-        time.sleep(0.005)
-        response = self.serial.read(12)    # wait for answer 
-        
-        if len(response) < 12:
-            raise IOError("Incomplete response received from driver.")
+        self.serial.reset_input_buffer()
+        self.serial.write(bytes(request))
+        self.serial.flush()
 
-        response = response[4:]  # skip echo (first 4 bytes)
-                
+        timeout = time.time() + 0.1  # wait max 100 ms
+        buffer = bytearray()
+
+        while time.time() < timeout:
+            if self.serial.in_waiting:
+                buffer += self.serial.read(self.serial.in_waiting)
+
+            # Look for sync-byte (0x05) and also take the 7 bytes that follow
+            for i in range(len(buffer) - 7):
+                if buffer[i] == 0x05 and buffer[i + 1] == 0xFF:
+                    response = buffer[i:i + 8]
+                    self.logger.debug(f"[{self.name}] Read response: {response}")
+                    return self._parse_response(response, reg_addr)
+
+            time.sleep(0.005)  # laat de buffer zich opbouwen
+
+        raise IOError("No valid response received from driver (sync byte not found).")
+
+    def _parse_response(self, response: bytes, reg_addr: int) -> int:
         if response[0] != 0x05:
             raise IOError(f"Invalid sync byte in response: 0x{response[0]:02X}")
         if response[1] != 0xFF:

@@ -1,7 +1,7 @@
 import os
 from pyberryplc.core import AbstractPLC
 from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
-from pyberryplc.motion_profiles import TrapezoidalProfile
+from pyberryplc.motion import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
 

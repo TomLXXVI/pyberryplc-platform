@@ -27,7 +27,8 @@ class A4988StepperMotor(StepperMotor):
         ms3_pin: int | None = None,
         full_steps_per_rev: int = 200,
         microstep_resolution: str = "full",
-        logger: logging.Logger | None = None
+        logger: logging.Logger | None = None,
+        name: str = ""
     ) -> None:
         """
         Initialize an A4988 stepper motor driver instance.
@@ -75,7 +76,7 @@ class A4988StepperMotor(StepperMotor):
         super().__init__(
             step_pin, dir_pin, enable_pin, 
             full_steps_per_rev, microstep_resolution, 
-            logger
+            logger, name
         )
     
     def _validate_microstepping(self, microstep_resolution: str) -> int:
@@ -115,10 +116,12 @@ class A4988StepperMotor(StepperMotor):
             self.ms2.write(ms2_val)
             self.ms3.write(ms3_val)
             self.logger.info(
+                f"[{self.name}] "
                 f"Microstepping set to {self.microstep_resolution} "
                 f"(MS1={ms1_val}, MS2={ms2_val}, MS3={ms3_val})"
             )
         else:
             self.logger.warning(
+                f"[{self.name}] "
                 f"MS1/MS2/MS3 pins not configured, skipping microstepping setup"
             )

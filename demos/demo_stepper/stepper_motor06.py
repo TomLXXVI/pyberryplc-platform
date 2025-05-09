@@ -8,7 +8,7 @@ Control via keyboard input:
 
 import os
 from pyberryplc.core.plc import AbstractPLC
-from pyberryplc.motion_profiles.motion_profile import TrapezoidalProfile
+from pyberryplc.motion.profile import TrapezoidalProfile
 from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput

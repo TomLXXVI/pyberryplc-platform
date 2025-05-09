@@ -198,7 +198,6 @@ class AbstractPLC(ABC):
         # application: 
         self.hmi_input_register: dict[str, MemoryVariable] = {}
         self.hmi_output_register: dict[str, MemoryVariable] = {}
-        self.hmi_data: dict[str, Any] = {}
         
         if shared_data: self._setup_shared_data()
         
@@ -524,10 +523,6 @@ class AbstractPLC(ABC):
             for name, init_value in self.shared_data.hmi_outputs.items()
 
         }
-        self.hmi_data = {
-            name: obj
-            for name, obj in self.shared_data.hmi_data.items()
-        }
     
     def _read_inputs(self) -> None:
         """Reads all physical inputs (defined in the PLC application) and writes 
@@ -550,10 +545,15 @@ class AbstractPLC(ABC):
         if self.shared_data: self._read_hmi_inputs()
     
     def _read_hmi_inputs(self) -> None:
+        """Reads HMI inputs from `self.shared_data` and updates the HMI input
+        register.
+        """
         for name, value in self.shared_data.hmi_buttons.items():
             self.hmi_input_register[name].update(value)
-            if isinstance(value, bool):
-                self.shared_data.hmi_buttons[name] = False
+            # if an HMI button state has been read into the HMI register of the
+            # PLC always reset this state in `self.shared_data` (i.e. means that
+            # a button press in the HMI is valid for only one PLC scan cycle).
+            self.shared_data.hmi_buttons[name] = False
 
         for name, value in self.shared_data.hmi_switches.items():
             self.hmi_input_register[name].update(value)
@@ -582,12 +582,15 @@ class AbstractPLC(ABC):
         if self.shared_data: self._write_hmi_outputs()
     
     def _write_hmi_outputs(self) -> None:
+        """Writes the state of the HMI outputs in the PLC HMI output register
+        to `self.shared_data`.
+        """
         for name, mem_var in self.hmi_output_register.items():
             self.shared_data.hmi_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
-        """At the start of each new PLC scan cycle, the value in the 
-        "current state" location of marker and output variables is moved to the 
+        """At the start of each new PLC scan cycle, the values in the "current 
+        state" location of marker and output variables are moved to their 
         "previous state" location. This allows for edge detection on these 
         variables.
         """
@@ -600,6 +603,10 @@ class AbstractPLC(ABC):
         if self.shared_data: self._update_hmi_previous_states()
     
     def _update_hmi_previous_states(self) -> None:
+        """At the start of each new PLC scan cycle, the current states of HMI 
+        outputs in the PLC's HMI output register are moved to the previous state
+        location.
+        """
         for output in self.hmi_output_register.values():
             output.update(output.curr_state)
     

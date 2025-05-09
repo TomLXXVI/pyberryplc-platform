@@ -1,4 +1,4 @@
-from pyberryplc.motion_profiles import TrapezoidalProfile
+from pyberryplc.motion import TrapezoidalProfile
 
 from charts import LineChart
 

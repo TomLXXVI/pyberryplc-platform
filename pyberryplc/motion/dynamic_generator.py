@@ -1,4 +1,4 @@
-from .motion_profile import MotionProfile
+from .profile import MotionProfile
 
 
 class DynamicDelayGenerator:

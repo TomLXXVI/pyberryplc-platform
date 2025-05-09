@@ -1,6 +1,6 @@
 from logging import Logger
 
-from pyberryplc.core import AbstractPLC, SharedData, MemoryVariable
+from pyberryplc.core import AbstractPLC, SharedData
 from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
 
 
@@ -10,10 +10,10 @@ class StepperMotorPLC(AbstractPLC):
         super().__init__(shared_data=shared_data, logger=logger)
 
         self.motor = TMC2208StepperMotor(
-            step_pin=27,
-            dir_pin=26,
+            step_pin=21,
+            dir_pin=27,
             microstep_resolution="1/4",
-            uart=TMC2208UART(port="/dev/ttyAMA0"),
+            uart=TMC2208UART(port="/dev/ttyUSB1"),
             logger=self.logger,
         )
         
@@ -21,7 +21,6 @@ class StepperMotorPLC(AbstractPLC):
         
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")
-        self.X2 = self.add_marker("X2")
 
         self.start_motion = self.hmi_input_register["start_motion"]
         self.motor_busy = self.hmi_output_register["motor_busy"]
@@ -55,13 +54,9 @@ class StepperMotorPLC(AbstractPLC):
             self.X0.activate()
         
     def _execute_actions(self):
-        if self.X1.active:
-            if self.X1.rising_edge:
-                motion_profile = self.shared_data.hmi_data["motion_profile"]
-                self.motor.start_rotation_profile(motion_profile)
-        
-        if self.X2.rising_edge:
-            self.exit()
+        if self.X1.rising_edge:
+            motion_profile = self.shared_data.hmi_data["motion_profile"]
+            self.motor.start_rotation_profile(motion_profile)
     
     def control_routine(self):
         self._init_control()

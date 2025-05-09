@@ -1,7 +1,7 @@
 from pyberryplc.core.plc import AbstractPLC
 from pyberryplc.core.shared_data import SharedData
 from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
-from pyberryplc.motion_profiles import TrapezoidalProfile
+from pyberryplc.motion import TrapezoidalProfile
 
 
 class StepperMotorPLC(AbstractPLC):

@@ -51,6 +51,7 @@ class TMC2208StepperMotor(StepperMotor):
         uart: TMC2208UART | None = None,
         high_sensitivity: bool = False,
         logger: logging.Logger | None = None,
+        name: str = ""
     ) -> None:
         """
         Initialize a stepper motor controlled by a TMC2208 driver.
@@ -97,8 +98,9 @@ class TMC2208StepperMotor(StepperMotor):
         super().__init__(
             step_pin, dir_pin, enable_pin, 
             full_steps_per_rev, microstep_resolution, 
-            logger
+            logger, name
         )
+        self.uart.name = self.name  # pass the name of the driver also to the uart object
 
     def enable(self) -> None:
         """
@@ -122,11 +124,11 @@ class TMC2208StepperMotor(StepperMotor):
             self.uart.update_register(
                 reg_name="CHOPCONF", 
                 fields={
-                    "toff": 3,  # enable driver - Off time setting controls duration of slow decay phase
+                    "toff": 3,  # Enable driver - Off time setting controls duration of slow decay phase
                     "vsense": self.high_sensitivity,
                 }
             )
-            self.logger.info("Driver enabled")
+            self.logger.info(f"[{self.name}] Driver enabled")
         else:
             super().enable()
 
@@ -141,7 +143,7 @@ class TMC2208StepperMotor(StepperMotor):
         if self.uart is not None:
             self.uart.update_register(
                 reg_name="CHOPCONF", 
-                fields={"toff": 0}  # Driver disable, all bridges off
+                fields={"toff": 0}  # Driver disable, all bridges off, motor is freewheeling.
             )
             self.uart.close()
         super().disable()
@@ -193,11 +195,13 @@ class TMC2208StepperMotor(StepperMotor):
             self.ms1.write(ms1_val)
             self.ms2.write(ms2_val)
             self.logger.info(
+                f"[{self.name}] "
                 f"Microstepping set to {self.microstep_resolution} "
                 f"(MS1={ms1_val}, MS2={ms2_val})"
             )
         else:
             self.logger.warning(
+                f"[{self.name}] "
                 "MS1/MS2 pins not configured, skipping microstepping setup"
             )
 
@@ -206,6 +210,7 @@ class TMC2208StepperMotor(StepperMotor):
         mres = self.MICROSTEP_CONFIG_UART[self.microstep_resolution]
         self.uart.update_register("CHOPCONF", {"mres": mres})
         self.logger.info(
+            f"[{self.name}] "
             f"Setting microstepping via UART: {self.microstep_resolution} "
             f"(mres = {mres})"
         )
@@ -223,8 +228,13 @@ class TMC2208StepperMotor(StepperMotor):
         ----------
         run_current_pct : float
             Run current as a percentage (0–100).
+            To determine a safe `run_current_pct` value in order to limit the 
+            motor run current to its rated value, there is a utility-function 
+            `calculate_run_current_pct()` in `/utils/tmc_utils.py`.
         hold_current_pct : float
-            Hold current as a percentage (0–100).
+            Hold current as a percentage (0–100). This could be a smaller 
+            percentage than `run_current_pct`, but will also depend on the
+            holding torque that may be required in the specific application.
         ihold_delay : int
             Delay before switching to hold current (0–15).
         
@@ -255,13 +265,14 @@ class TMC2208StepperMotor(StepperMotor):
         if 0 < ihold <= 1:
             ihold = 1
 
-        self.uart.update_register("GCONF", {"i_scale_analog": False})
+        self.uart.update_register("GCONF", {"i_scale_analog": False})  # use internal reference derived from 5VOUT
         self.uart.write_register("IHOLD_IRUN", IHOLDIRUNRegister(
             ihold=ihold,
             irun=irun,
             ihold_delay=ihold_delay
         ))
         self.logger.info(
+            f"[{self.name}] "
             f"UART current config set: IRUN={irun}/31, IHOLD={ihold}/31, "
             f"DELAY={ihold_delay}"
         )

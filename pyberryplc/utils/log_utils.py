@@ -2,6 +2,16 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 import os
 import sys
+from datetime import datetime
+
+
+class MicrosecondFormatter(logging.Formatter):
+    
+    def formatTime(self, record, datefmt=None):
+        ct = datetime.fromtimestamp(record.created)
+        if datefmt:
+            return ct.strftime(datefmt)
+        return super().formatTime(record, datefmt)
 
 
 def init_logger(
@@ -31,9 +41,9 @@ def init_logger(
     logger.propagate = False  # prevents duplicate log lines if already propagated
 
     if not logger.handlers:
-        formatter = logging.Formatter(
+        formatter = MicrosecondFormatter(
             fmt="%(asctime)s [%(levelname)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            datefmt="%Y-%m-%d %H:%M:%S.%f"
         )
 
         file_handler = TimedRotatingFileHandler(

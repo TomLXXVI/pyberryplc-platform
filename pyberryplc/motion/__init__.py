@@ -1,4 +1,4 @@
-from .motion_profile import (
+from .profile import (
     MotionProfile,
     TrapezoidalProfile,
     SCurvedProfile

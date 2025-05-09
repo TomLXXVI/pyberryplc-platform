@@ -1,6 +1,9 @@
 from abc import ABC, abstractmethod
+
 from gpiozero.pins.pigpio import PiGPIOFactory, PiFactory
 from gpiozero import DigitalInputDevice, DigitalOutputDevice, PWMOutputDevice
+
+import pigpio
 
 
 class GPIO(ABC):
@@ -131,16 +134,17 @@ class DigitalOutput(GPIO):
             initial_value=initial_value,
             pin_factory=self.pin_factory
         )
+        self._device.pin.function = 'output'
     
     def read(self) -> bool | int:
         return self._device.value
     
     def write(self, value: bool | int) -> None:
-        try:
-            value = bool(value) if isinstance(value, int) else value
-            self._device.value = value
-        except:
-            raise ValueError("Value must be `bool` or`int`.")
+        if not isinstance(value, (bool, int)):
+            raise ValueError("Value must be `bool` or `int`.")
+        value = bool(value)
+        self._device.pin.function = 'output'
+        self._device.value = value
 
 
 class PWMOutput(GPIO):
@@ -228,4 +232,22 @@ class PWMOutput(GPIO):
     def write(self, value: float) -> None:
         dc = self._get_duty_cycle(value)
         self._device.value = dc
+
+
+# ------------------------------------------------------------------------------
+
+class DigitalOutputPigpio:
     
+    def __init__(self, pin: int, name: str = "") -> None:
+        self.pin = pin
+        self.name = name
+        self.pi = pigpio.pi()
+        if not self.pi.connected:
+            raise IOError("Cannot connect to pigpio daemon")
+        self.pi.set_mode(self.pin, pigpio.OUTPUT)
+
+    def write(self, value: bool | int) -> None:
+        self.pi.write(self.pin, int(bool(value)))
+
+    def read(self) -> int:
+        return self.pi.read(self.pin)

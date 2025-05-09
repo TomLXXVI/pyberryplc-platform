@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion_profiles import TrapezoidalProfile, SCurvedProfile
+from pyberryplc.motion import TrapezoidalProfile, SCurvedProfile
 
 from plc_app import StepperMotorPLC
 
