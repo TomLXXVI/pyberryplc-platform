@@ -1,43 +1,7 @@
-"""
-Stepper Motor Base Class
-=========================
-
-This module defines an abstract base class `StepperMotor` for stepper motor 
-control via GPIO pins, with support for both blocking and non-blocking motion 
-execution. It provides a consistent interface for various motion modes, 
-including:
-
-1. **Fixed Speed Rotation**
-   - Rotate a given angle at constant angular speed.
-   - Available in both blocking (`rotate_fixed`) and non-blocking 
-     (`start_rotation_fixed`) modes.
-
-2. **Static Motion Profile Rotation**
-   - Rotate using a predefined motion profile (e.g., trapezoidal, S-curve).
-   - Delays between steps are precomputed.
-   - Available in both blocking (`rotate_profile`) and non-blocking 
-     (`start_rotation_profile`) modes.
-
-3. **Dynamic Motion Profile Rotation**
-   - Real-time step control using a `DynamicDelayGenerator`.
-   - Supports live transitions (acceleration → cruising → deceleration) based on
-     external triggers.
-   - Available in blocking (`rotate_dynamic`) and non-blocking 
-     (`start_rotation_dynamic`) modes.
-
-The base class also handles:
-- Microstepping configuration
-- Step pulse generation (including pulse width)
-- GPIO-based direction and enable control
-- Step timing using monotonic timestamps
-
-This class is intended to be subclassed by concrete driver implementations
-(e.g., A4988, TMC2208) that provide hardware-specific microstepping logic.
-"""
-
 import time
 import logging
 from abc import ABC, abstractmethod
+from enum import StrEnum
 from collections import deque
 import threading
 import math
