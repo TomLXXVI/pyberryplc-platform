@@ -1,6 +1,12 @@
 import os
 from pyberryplc.core import AbstractPLC
-from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
+from pyberryplc.stepper import (
+    PinConfig,
+    TMC2208StepperMotor, 
+    TMC2208UART,
+    RotatorType,
+    Direction
+)
 from pyberryplc.motion import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
@@ -8,26 +14,27 @@ from pyberryplc.utils.keyboard_input import KeyInput
 
 class StepperUARTTestPLC(AbstractPLC):
     
-    def __init__(self):
-        super().__init__()
-        
+    def __init__(self, logger):
+        super().__init__(logger=logger)
         self.key_input = KeyInput()
-
+        
+        # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
-            step_pin=27,
-            dir_pin=26,
-            full_steps_per_rev=200,
-            microstep_resolution="1/16",
-            uart=TMC2208UART(port="/dev/ttyAMA0"),
-            logger=self.logger
+            pin_config=PinConfig(
+                step_pin_number=21,
+                dir_pin_number=27
+            ),
+            logger=self.logger,
+            name="motor X",
+            uart=TMC2208UART(port="/dev/ttyUSB1")
         )
-
-        self.profile = TrapezoidalProfile(
+        self.stepper.attach_rotator(RotatorType.PROFILE)
+        self.stepper.rotator.profile = TrapezoidalProfile(
             ds_tot=180,
             dt_tot=1,
             dt_acc=0.25
         )
-                
+
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")
         self.X2 = self.add_marker("X2")
@@ -38,9 +45,17 @@ class StepperUARTTestPLC(AbstractPLC):
         if self.input_flag:
             self.input_flag = False
             
-            # Stepper driver configuration
-            self.stepper.enable()
-            self.stepper.set_microstepping()
+            # Stepper driver configuration via UART
+            self.stepper.enable(high_sensitivity=True)
+            self.stepper.configure_microstepping(
+                resolution="1/16",
+                ms_pins=None,
+                full_steps_per_rev=200
+            )
+            self.stepper.set_current_via_uart(
+                run_current_pct=35.0,
+                hold_current_pct=10.0
+            )
             
             self.X0.activate()
     
@@ -65,17 +80,13 @@ class StepperUARTTestPLC(AbstractPLC):
             self.logger.info("Press 's' to start motor")
             
         if self.X1.rising_edge:
-            self.stepper.rotate_profile(
-                direction="forward", 
-                profile=self.profile
-            )
+            self.stepper.rotator.direction = Direction.COUNTERCLOCKWISE
+            self.stepper.rotator.rotate()
             self.logger.info("Press 'r' to start motor in reverse")
             
         if self.X2.rising_edge:
-            self.stepper.rotate_profile(
-                direction="backward", 
-                profile=self.profile
-            )
+            self.stepper.rotator.direction = Direction.CLOCKWISE
+            self.stepper.rotator.rotate()
             self.logger.info("Press 'q' to go back to idle")
             
     def control_routine(self):
@@ -92,11 +103,13 @@ class StepperUARTTestPLC(AbstractPLC):
         pass
     
     def crash_routine(self, exception: Exception) -> None:
-        self.exit_routine()
+        self.logger.error("PLC crashed! - Disabling driver.")
+        self.stepper.disable()
 
 
 if __name__ == "__main__":
     os.system("clear")
-    init_logger()
-    plc = StepperUARTTestPLC()
+    logger = init_logger(name="STEPPER PLC")
+    logger.info("Run `stepper_motor04.py`")
+    plc = StepperUARTTestPLC(logger)
     plc.run()

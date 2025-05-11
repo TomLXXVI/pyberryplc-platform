@@ -1,6 +1,5 @@
 from pyberryplc.motion.control import xy_motion_control, get_pitch
-
-from plc_app_v2 import XYMotionPLC, SharedData
+from plc_app import XYMotionPLC, SharedData
 
 
 if __name__ == '__main__':
@@ -14,6 +13,7 @@ if __name__ == '__main__':
         profile_type="trapezoidal"
     )
     
+    print(f"Travel distance: X = {mp_x.ds_tot:.2f} deg, Y = {mp_y.ds_tot:.2f} deg")
     print(f"Travel time: X = {mp_x.dt_tot:.2f} s, Y = {mp_y.dt_tot:.2f} s")
     print(f"Speed: X = {mp_x.v_m:.3f} deg/s, Y = {mp_y.v_m:.3f} deg/s")
     
@@ -23,13 +23,17 @@ if __name__ == '__main__':
             "motion_profile_x": mp_x,
             "motion_profile_y": mp_y
         },
-        hmi_outputs={
+        hmi_digital_outputs={
             "motor_x_ready": False,
             "motor_x_busy": False,
             "motor_y_ready": False,
-            "motor_y_busy": False
+            "motor_y_busy": False,
+        },
+        hmi_analog_outputs={
+            "travel_time_x": float('nan'),
+            "travel_time_y": float('nan'),
         }
     )
-    
-    plc = XYMotionPLC(shared_data)
+
+    plc = XYMotionPLC(shared_data=shared_data)
     plc.run()

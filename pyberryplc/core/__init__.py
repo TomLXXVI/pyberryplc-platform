@@ -7,7 +7,7 @@ counters, switches, and the main PLC execution engine.
 
 from pyberryplc.core.plc import AbstractPLC, MemoryVariable
 from pyberryplc.core.shared_data import SharedData
-from pyberryplc.core.gpio import DigitalInput, DigitalOutput, PWMOutput
+from pyberryplc.core.gpio import DigitalInput, DigitalOutput, PWMOutput, DigitalOutputPigpio
 from pyberryplc.core.timers import TimerSingleScan, TimerOnDelay, TimerOffDelay
 from pyberryplc.core.counters import CounterUp, CounterDown, CounterUpDown
 from pyberryplc.core.switches import ToggleSwitch
@@ -20,6 +20,7 @@ __all__ = [
     "DigitalInput",
     "DigitalOutput",
     "PWMOutput",
+    "DigitalOutputPigpio",
     "TimerSingleScan",
     "TimerOnDelay",
     "TimerOffDelay",

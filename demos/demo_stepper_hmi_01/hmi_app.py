@@ -16,7 +16,7 @@ class StepperHMI(AbstractHMI):
                 "start_motor_right": False,
                 "stop_motor": False
             },
-            hmi_outputs={
+            hmi_digital_outputs={
                 "motor_running": False,
             }
         )
@@ -64,7 +64,7 @@ class StepperHMI(AbstractHMI):
         self.status_label = ui.label("Motor is stopped")
         
     def update_status(self):
-        running = self.shared_data.hmi_outputs.get("motor_running", False)
+        running = self.shared_data.hmi_digital_outputs.get("motor_running", False)
         self.status_label.text = "Motor is running" if running else "Motor is stopped"
 
         self.set_button_state(self.btn_left, enabled=not running)

@@ -4,10 +4,21 @@ import multiprocessing
 from multiprocessing.connection import Connection
 
 from pyberryplc.motion import MotionProfile
-from .base import StepperMotor
+from .base import StepperMotor, ProfileRotator, Direction
 
 
 TStepperMotor = TypeVar("TStepperMotor", bound=StepperMotor)
+
+
+class ProfileRotatorProcess(ProfileRotator):
+    
+    def preprocess(self, direction: Direction, profile: MotionProfile) -> None:
+        self.direction = direction
+        self.profile = profile
+        self._generate_delays()
+
+    def rotate(self) -> None:
+        self._step_loop()
 
 
 class StepperMotorProcess(multiprocessing.Process):
@@ -52,10 +63,12 @@ class StepperMotorProcess(multiprocessing.Process):
     def run(self) -> None:
         """Main loop of the motor process. Waits for commands and executes them."""
         motor = self.motor_class(**self.motor_kwargs)
-        motor.enable()
+        motor.rotator = ProfileRotatorProcess(motor)
         
-        if self.config_callback:
+        if self.config_callback is not None:
             self.config_callback(motor)
+        else:
+            motor.enable()
         
         prepared = False
         
@@ -69,29 +82,23 @@ class StepperMotorProcess(multiprocessing.Process):
                 continue
 
             cmd = msg.get("cmd")
-
+            
             if cmd == "prepare_profile":
                 profile: MotionProfile = msg["profile"]
                 direction: str = msg.get("direction", "forward")
-
-                motor.calculate_rotation_profile(profile, direction)
+                if direction == Direction.COUNTERCLOCKWISE:
+                    motor.rotator.preprocess(Direction.COUNTERCLOCKWISE, profile)
+                else:
+                    motor.rotator.preprocess(Direction.CLOCKWISE, profile)
                 self.conn.send({"status": "ready", "name": self.name})
                 prepared = True
 
             elif cmd == "start" and prepared:
-                start_time: float | None = msg.get("start_time")
-                if start_time is not None:
-                    now = time.perf_counter()
-                    wait_time = start_time - now
-                    if wait_time > 0:
-                        time.sleep(wait_time)
-                
-                motor.start_rotation_profile()
-                
-                while motor.busy:
-                    time.sleep(0.005)
-
-                self.conn.send({"status": "done", "name": self.name})
+                start_time = time.perf_counter()
+                motor.rotator.rotate()
+                end_time = time.perf_counter()
+                travel_time = end_time - start_time
+                self.conn.send({"status": "done", "name": self.name, "travel_time": travel_time})
                 prepared = False
 
             elif cmd == "shutdown":

@@ -15,8 +15,8 @@ class StepperHMI(AbstractHMI):
         # Define the data that will be shared between PLC and HMI.
         shared_data = SharedData(
             hmi_buttons={"start_motion": False},
-            hmi_data={"motion_profile": None},
-            hmi_outputs={"motor_busy": False}
+            hmi_data={"profile": None},
+            hmi_digital_outputs={"motor_busy": False}
         )
         
         # GUI-widgets that need a reference.
@@ -98,7 +98,7 @@ class StepperHMI(AbstractHMI):
     
     def _start_motion(self) -> None:
         # Send data to PLC
-        self.shared_data.hmi_data["motion_profile"] = self.motion_profile
+        self.shared_data.hmi_data["profile"] = self.motion_profile
         self.shared_data.hmi_buttons["start_motion"] = True
         
         # Info to the HMI operator            
@@ -150,6 +150,6 @@ class StepperHMI(AbstractHMI):
         self.plot.update()
     
     def update_status(self) -> None:
-        motor_busy = self.shared_data.hmi_outputs["motor_busy"]
+        motor_busy = self.shared_data.hmi_digital_outputs["motor_busy"]
         self.status_label.text = "Motor running" if motor_busy else "Motor stopped"
    

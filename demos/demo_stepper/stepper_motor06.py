@@ -8,29 +8,36 @@ Control via keyboard input:
 
 import os
 from pyberryplc.core.plc import AbstractPLC
+from pyberryplc.stepper import (
+    TMC2208StepperMotor, 
+    PinConfig,
+    TMC2208UART,
+    RotatorType,
+    Direction
+)
 from pyberryplc.motion.profile import TrapezoidalProfile
-from pyberryplc.stepper import TMC2208StepperMotor, TMC2208UART
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
 
 
 class StepperDynamicPLC(AbstractPLC):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, logger):
+        super().__init__(logger=logger)
 
         self.key_input = KeyInput()
 
+        # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
-            step_pin=27,
-            dir_pin=26,
-            full_steps_per_rev=200,
-            microstep_resolution="1/8",
-            uart=TMC2208UART(port="/dev/ttyAMA0"),
-            high_sensitivity=True,
-            logger=self.logger
+            pin_config=PinConfig(
+                step_pin_number=21,
+                dir_pin_number=27
+            ),
+            logger=self.logger,
+            name="motor X",
+            uart=TMC2208UART(port="/dev/ttyUSB1")
         )
-
-        self.profile = TrapezoidalProfile(v_m=180.0, a_m=720.0, ds_tot=90.0)
+        self.stepper.attach_rotator(RotatorType.DYNAMIC_THREADED)
+        self.stepper.rotator.profile = TrapezoidalProfile(v_m=180.0, a_m=720.0, ds_tot=90.0)
         
         self.X0 = self.add_marker("X0")  # Idle
         self.X1 = self.add_marker("X1")  # Motion active
@@ -41,16 +48,23 @@ class StepperDynamicPLC(AbstractPLC):
     def _init_control(self):
         if not self._init_done:
             self._init_done = True
-            self.stepper.enable()
-            self.stepper.set_microstepping()
-            self.stepper.set_current_via_uart(
-                run_current_pct=19, 
-                hold_current_pct=10
+
+            # Stepper driver configuration via UART
+            self.stepper.enable(high_sensitivity=True)
+            self.stepper.configure_microstepping(
+                resolution="1/16",
+                ms_pins=None,
+                full_steps_per_rev=200
             )
+            self.stepper.set_current_via_uart(
+                run_current_pct=35.0,
+                hold_current_pct=10.0
+            )
+            
             self.X0.activate()
 
     def _sequence_control(self):
-        if self.X0.active and not self.stepper.busy and self.key_input.rising_edge("s"):
+        if self.X0.active and not self.stepper.rotator.busy and self.key_input.rising_edge("s"):
             self.logger.info("Key 's' pressed: starting motion.")
             self.X0.deactivate()
             self.X1.activate()
@@ -60,21 +74,19 @@ class StepperDynamicPLC(AbstractPLC):
             self.X1.deactivate()
             self.X2.activate()
         
-        if self.X2.active and not self.stepper.busy:
+        if self.X2.active and not self.stepper.rotator.busy:
             self.X2.deactivate()
             self.X0.activate()
 
     def _execute_actions(self):
         if self.X1.rising_edge:
             self.logger.info("Stepper starts moving.")
-            self.stepper.start_rotation_dynamic(
-                self.profile, 
-                direction="forward"
-            )
+            self.stepper.rotator.direction = Direction.COUNTERCLOCKWISE
+            self.stepper.rotator.start()
         
         if self.X2.rising_edge:
             self.logger.info("Stepper is stopped.")
-            self.stepper.stop_rotation_dynamic()
+            self.stepper.rotator.stop()
         
     def control_routine(self):
         self.key_input.update()
@@ -96,6 +108,8 @@ class StepperDynamicPLC(AbstractPLC):
 
 if __name__ == "__main__":
     os.system("clear")
-    init_logger(logging_level="debug")
-    plc = StepperDynamicPLC()
+    init_logger()
+    logger = init_logger(name="STEPPER PLC")
+    logger.info("Run `stepper_motor06.py`")
+    plc = StepperDynamicPLC(logger)
     plc.run()

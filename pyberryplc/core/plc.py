@@ -515,14 +515,17 @@ class AbstractPLC(ABC):
             for name, init_value in self.shared_data.hmi_switches.items()
         })
         self.hmi_input_register.update({
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
             for name, init_value in self.shared_data.hmi_analog_inputs.items()
         })
         self.hmi_output_register = {
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
-            for name, init_value in self.shared_data.hmi_outputs.items()
-
+            for name, init_value in self.shared_data.hmi_digital_outputs.items()
         }
+        self.hmi_output_register.update({
+            name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
+            for name, init_value in self.shared_data.hmi_analog_outputs.items()
+        })
     
     def _read_inputs(self) -> None:
         """Reads all physical inputs (defined in the PLC application) and writes 
@@ -586,7 +589,7 @@ class AbstractPLC(ABC):
         to `self.shared_data`.
         """
         for name, mem_var in self.hmi_output_register.items():
-            self.shared_data.hmi_outputs[name] = mem_var.curr_state
+            self.shared_data.hmi_digital_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
         """At the start of each new PLC scan cycle, the values in the "current 

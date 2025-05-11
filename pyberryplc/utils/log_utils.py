@@ -42,7 +42,7 @@ def init_logger(
 
     if not logger.handlers:
         formatter = MicrosecondFormatter(
-            fmt="%(asctime)s [%(levelname)s] %(message)s",
+            fmt="%(asctime)s [%(name)s] [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S.%f"
         )
 

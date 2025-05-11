@@ -115,7 +115,7 @@ class DigitalOutput(GPIO):
             If `True`, the output will be HIGH (e.g. at 5 V or 3.3 V) when 
             triggered (i.e. when writing 1 to it).
             If `False`, the opposite happens: the output will be LOW (pulled to 
-            GND) when the output is triggered.
+            GND) when triggered.
         pin_factory:
             Abstraction layer that allows `gpiozero` to interface with the
             hardware-specific GPIO implementation behind the scenes. If `None`,
@@ -238,16 +238,29 @@ class PWMOutput(GPIO):
 
 class DigitalOutputPigpio:
     
-    def __init__(self, pin: int, name: str = "") -> None:
+    def __init__(
+        self, 
+        pin: int, 
+        label: str = "", 
+        active_high: bool = True
+    ) -> None:
         self.pin = pin
-        self.name = name
+        self.label = label
+        self.active_high = active_high
         self.pi = pigpio.pi()
         if not self.pi.connected:
             raise IOError("Cannot connect to pigpio daemon")
         self.pi.set_mode(self.pin, pigpio.OUTPUT)
 
     def write(self, value: bool | int) -> None:
-        self.pi.write(self.pin, int(bool(value)))
+        if not self.active_high:
+            value = not bool(value)
+        else:
+            value = bool(value)
+        self.pi.write(self.pin, int(value))
 
     def read(self) -> int:
-        return self.pi.read(self.pin)
+        output = self.pi.read(self.pin)
+        if not self.active_high:
+            output = int(not bool(output))
+        return output

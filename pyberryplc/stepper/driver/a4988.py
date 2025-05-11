@@ -1,123 +1,57 @@
 import logging
-from pyberryplc.core.gpio import DigitalOutput
-from pyberryplc.stepper.driver.base import StepperMotor
+
+from pyberryplc.stepper.driver.base import (
+    StepperMotor, 
+    PinConfig, 
+    MicrostepPinConfig, 
+    MicrostepConfig
+)
 
 
 class A4988StepperMotor(StepperMotor):
     """
-    Stepper motor controlled via an A4988 driver and GPIO.
-    Supports microstepping configuration via MS1, MS2, and MS3 pins.
-    """
+    Stepper motor driver class for the A4988 chip.
 
-    MICROSTEP_CONFIG_GPIO: dict[str, tuple[int, int, int]] = {
-        "full":  (0, 0, 0),
-        "1/2":   (1, 0, 0),
-        "1/4":   (0, 1, 0),
-        "1/8":   (1, 1, 0),
-        "1/16":  (1, 1, 1),
+    This driver supports GPIO-based microstepping using MS1, MS2, and MS3 pins.
+    """
+    MICROSTEP_GPIO_CFG: dict[str, tuple[int, int, int]] = {
+        "full": (0, 0, 0),
+        "1/2": (1, 0, 0),
+        "1/4": (0, 1, 0),
+        "1/8": (1, 1, 0),
+        "1/16": (1, 1, 1),
     }
     
     def __init__(
         self,
-        step_pin: int,
-        dir_pin: int,
-        enable_pin: int | None = None,
-        ms1_pin: int | None = None,
-        ms2_pin: int | None = None,
-        ms3_pin: int | None = None,
-        full_steps_per_rev: int = 200,
-        microstep_resolution: str = "full",
+        pin_config: PinConfig,
         logger: logging.Logger | None = None,
         name: str = ""
     ) -> None:
-        """
-        Initialize an A4988 stepper motor driver instance.
+        super().__init__(pin_config, logger, name)
+        self.microstep_config = MicrostepConfig(supported=set(self.MICROSTEP_GPIO_CFG.keys()))
 
-        Parameters
-        ----------
-        step_pin : int
-            GPIO pin connected to the STEP input of the driver.
-        dir_pin : int
-            GPIO pin connected to the DIR input of the driver.
-        enable_pin : int | None, optional
-            GPIO pin connected to the EN input of the driver (active low).
-        ms1_pin : int | None, optional
-            GPIO pin connected to MS1 for microstepping control.
-        ms2_pin : int | None, optional
-            GPIO pin connected to MS2 for microstepping control.
-        ms3_pin : int | None, optional
-            GPIO pin connected to MS3 for microstepping control.
-        full_steps_per_rev : int, optional
-            Number of full steps per motor revolution. Default is 200.
-        microstep_resolution : str, optional
-            The microstep resolution to be used. Default is full-step mode.
-            Valid microstep resolutions are defined in class attribute 
-            MICROSTEP_FACTORS of the base class. However, it is possible that 
-            the actual driver does not support all of these. This should be 
-            checked in advance.
-        logger : logging.Logger | None, optional
-            Logger instance for debug/info output.
-        """
-        self.ms1 = (
-            DigitalOutput(ms1_pin, label="MS1")
-            if ms1_pin is not None
-            else None
-        )
-        self.ms2 = (
-            DigitalOutput(ms2_pin, label="MS2")
-            if ms2_pin is not None
-            else None
-        )
-        self.ms3 = (
-            DigitalOutput(ms3_pin, label="MS3")
-            if ms3_pin is not None
-            else None
-        )
-        super().__init__(
-            step_pin, dir_pin, enable_pin, 
-            full_steps_per_rev, microstep_resolution, 
-            logger, name
-        )
-    
-    def _validate_microstepping(self, microstep_resolution: str) -> int:
-        """
-        Checks whether the microstep resolution is valid for the A4988 driver. 
-        
-        Returns
-        -------
-        microstep_resolution : str
-            The microstep resolution if valid.
-        microstep_factor: int
-            The microstep factor used for calculating the steps per degree and 
-            the step angle.
-        
-        Raises
-        ------
-        ValueError :
-            If the microstep resolution is unavailable on the A4988 driver.
-        """
-        valid_resolutions = list(self.MICROSTEP_CONFIG_GPIO.keys())
-        if microstep_resolution in valid_resolutions:
-            return self.MICROSTEP_FACTORS[microstep_resolution]
-        else:
-            raise ValueError(
-                f"Microstep resolution '{microstep_resolution}' is "
-                f"unavailable on this driver. "
-                f"Available: {valid_resolutions}"
-            )
-    
-    def set_microstepping(self) -> None:
+    def configure_microstepping(
+        self, 
+        resolution: str = "1/16",
+        ms_pins: MicrostepPinConfig | None = None,
+        full_steps_per_rev: int = 200
+    ) -> None:
         """
         Configure microstepping on the A4988 driver.
         """
-        if self.ms1 and self.ms2 and self.ms3:
-            ms1_val, ms2_val, ms3_val = self.MICROSTEP_CONFIG_GPIO[self.microstep_resolution]
-            self.ms1.write(ms1_val)
-            self.ms2.write(ms2_val)
-            self.ms3.write(ms3_val)
+        super().configure_microstepping(resolution, ms_pins, full_steps_per_rev)
+        ms1 = self.microstep_config.pin_config.ms1
+        ms2 = self.microstep_config.pin_config.ms2
+        ms3 = self.microstep_config.pin_config.ms3
+        mres = self.microstep_config.resolution
+        if ms1 and ms2 and ms3:
+            ms1_val, ms2_val, ms3_val = self.MICROSTEP_GPIO_CFG[mres]
+            ms1.write(ms1_val)
+            ms2.write(ms2_val)
+            ms3.write(ms3_val)
             self.logger.info(
-                f"[{self.name}] "
-                f"Microstepping set to {self.microstep_resolution} "
+                f"[{self.name}] Microstepping set to {mres} "
                 f"(MS1={ms1_val}, MS2={ms2_val}, MS3={ms3_val})"
             )
         else:
