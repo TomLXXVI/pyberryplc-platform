@@ -167,10 +167,9 @@ class XYMotionPLC(AbstractPLC):
             })
 
         if self.X2.rising_edge:
-            start_time = time.perf_counter() + 0.2
             self.logger.info(f"Start motion")
-            self._px_parent.send({"cmd": "start", "start_time": start_time})
-            self._py_parent.send({"cmd": "start", "start_time": start_time})
+            self._px_parent.send({"cmd": "start"})
+            self._py_parent.send({"cmd": "start"})
 
     def control_routine(self):
         self._init_control()

@@ -8,7 +8,7 @@ if __name__ == '__main__':
         p1=(0.0, 0.0), 
         p2=(0.02, 0.02),
         pitch=get_pitch(1, 0.01),
-        omega=180.0,
+        omega=45.0,
         dt_acc=0.2,
         profile_type="trapezoidal"
     )

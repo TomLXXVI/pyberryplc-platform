@@ -94,11 +94,8 @@ class StepperMotorProcess(multiprocessing.Process):
                 prepared = True
 
             elif cmd == "start" and prepared:
-                start_time = time.perf_counter()
                 motor.rotator.rotate()
-                end_time = time.perf_counter()
-                travel_time = end_time - start_time
-                self.conn.send({"status": "done", "name": self.name, "travel_time": travel_time})
+                self.conn.send({"status": "done", "name": self.name, "travel_time": motor.rotator.moving_time})
                 prepared = False
 
             elif cmd == "shutdown":

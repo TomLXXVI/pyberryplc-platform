@@ -27,7 +27,8 @@ def velocity(
         v_dot[0] = a(t)
         return v_dot
 
-    sol = solve_ivp(fun, (t0, t), [v0], method='LSODA', t_eval=np.linspace(t0, t))
+    sol = solve_ivp(fun, (t0, t), [v0], method='LSODA', t_eval=np.linspace(t0, t, endpoint=True))
+    # noinspection PyUnresolvedReferences
     return sol.t, sol.y[0]
 
 
@@ -56,5 +57,6 @@ def position(
         s_dot[1] = a(t)
         return s_dot
 
-    sol = solve_ivp(fun, (t0, t), [s0, v0], method='LSODA', t_eval=np.linspace(t0, t))
+    sol = solve_ivp(fun, (t0, t), [s0, v0], method='LSODA', t_eval=np.linspace(t0, t, endpoint=True))
+    # noinspection PyUnresolvedReferences
     return sol.t, sol.y[0], sol.y[1]

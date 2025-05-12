@@ -39,8 +39,11 @@ class Rotator(ABC):
     """
     def __init__(self, motor: 'StepperMotor') -> None:
         self.motor = motor
+        self._step_width = 20e-6  # default step pulse width in seconds
         self._direction: Direction = Direction.COUNTERCLOCKWISE
         self._busy = False
+        self._start_time: float = 0.0
+        self._end_time: float = 0.0
     
     @property
     def direction(self) -> Direction:
@@ -59,6 +62,10 @@ class Rotator(ABC):
         """Return whether the motor is currently executing a motion."""
         return self._busy
     
+    @property
+    def moving_time(self) -> float:
+        return self._end_time - self._start_time
+    
     def _write_direction(self) -> None:
         """
         Applies the current direction setting to the DIR pin of the motor.
@@ -72,7 +79,7 @@ class Rotator(ABC):
         """
         if self.motor.step:
             self.motor.step.write(True)
-            time.sleep(self.motor.step_width)
+            time.sleep(self._step_width)
             self.motor.step.write(False)
 
 
@@ -139,7 +146,7 @@ class FixedRotator(BlockingRotator):
 
     def _generate_delays(self) -> None:
         steps = int(self._angle * self.motor.steps_per_degree)
-        delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self.motor.step_width
+        delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self._step_width
         self._delays = [delay] * steps
         
     def rotate(self) -> None:
@@ -148,9 +155,11 @@ class FixedRotator(BlockingRotator):
         self._busy = True
         self._write_direction()
         self._generate_delays()
+        self._start_time = time.perf_counter()
         for delay in self._delays:
             self._pulse_step_pin()
             time.sleep(delay)
+        self._end_time = time.perf_counter()
         self._busy = False
 
 
@@ -188,16 +197,18 @@ class FixedRotatorThreaded(NonBlockingRotator):
     
     def _generate_delays(self) -> None:
         steps = int(self._angle * self.motor.steps_per_degree)
-        delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self.motor.step_width
+        delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self._step_width
         self._queue = deque([delay] * steps)
 
     def _step_loop(self) -> None:
         self._busy = True
         self._write_direction()
+        self._start_time = time.perf_counter()
         while self._queue:
             delay = self._queue.popleft()
             self._pulse_step_pin()
             time.sleep(delay)
+        self._end_time = time.perf_counter()
         self._busy = False
 
     def start(self) -> None:
@@ -231,22 +242,19 @@ class ProfileRotator(Rotator):
     def _generate_delays(self) -> None:
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
-        angles = [
-            i * step_angle 
-            for i in range(int(final_angle / step_angle))
-        ]
-        times = list(map(self.profile.get_fn_time_from_position(), angles))
-        self._delays = [
-            max(0.0, t2 - t1 - self.motor.step_width) 
-            for t1, t2 in zip(times, times[1:])
-        ]
+        num_steps = int(final_angle / step_angle)
+        angles = [i * step_angle for i in range(num_steps + 1)]
+        times = list(map(self._motion_profile.get_fn_time_from_position(), angles))
+        self._delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
 
     def _step_loop(self) -> None:
         self._busy = True
         self._write_direction()
+        self._start_time = time.perf_counter()
         for delay in self._delays:
             self._pulse_step_pin()
             time.sleep(delay)
+        self._end_time = time.perf_counter()
         self._busy = False
     
     def rotate(self) -> None:
@@ -278,18 +286,21 @@ class ProfileRotatorThreaded(NonBlockingRotator):
     def _generate_delays(self) -> None:
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
-        angles = [i * step_angle for i in range(int(final_angle / step_angle))]
+        num_steps = int(final_angle / step_angle)
+        angles = [i * step_angle for i in range(num_steps + 1)]
         times = list(map(self._motion_profile.get_fn_time_from_position(), angles))
-        delays = [max(0.0, t2 - t1 - self.motor.step_width) for t1, t2 in zip(times, times[1:])]
+        delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
         self._queue = deque(delays)
 
     def _step_loop(self) -> None:
         self._busy = True
         self._write_direction()
+        self._start_time = time.perf_counter()
         while self._queue:
             delay = self._queue.popleft()
             self._pulse_step_pin()
             time.sleep(delay)
+        self._end_time = time.perf_counter()
         self._busy = False
 
     def start(self) -> None:
@@ -323,6 +334,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         self._motion_profile = value
     
     def _step_loop(self):
+        self._start_time = time.perf_counter()
         while True:
             now = time.perf_counter()
             if now >= self._next_step_time:
@@ -335,6 +347,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
                     self._generator = None
                     break
             time.sleep(0.0005)
+        self._end_time = time.perf_counter()
     
     def start(self) -> None:
         self._busy = True
@@ -522,7 +535,6 @@ class StepperMotor(typing.Generic[TRotator], ABC):
         self.step = self.pin_config.step
         self._enable = self.pin_config.enable
 
-        self.step_width = 10e-6  # default step pulse width in seconds
         self.rotator: TRotator | None = None
 
     @property

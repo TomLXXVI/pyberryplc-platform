@@ -282,14 +282,14 @@ class MotionProfile(ABC):
         t3_arr, v3_arr = velocity(t3, self._decel_fun, t2, v2)
         
         if t2_arr is None:
-            t_arr = np.concatenate((t1_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t3_arr))
         else:
-            t_arr = np.concatenate((t1_arr, t2_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t2_arr[:-1], t3_arr))
         
         if v2_arr is None:
-            v_arr = np.concatenate((v1_arr, v3_arr))
+            v_arr = np.concatenate((v1_arr[:-1], v3_arr))
         else:
-            v_arr = np.concatenate((v1_arr, v2_arr, v3_arr))
+            v_arr = np.concatenate((v1_arr[:-1], v2_arr[:-1], v3_arr))
         
         return t_arr, v_arr
 
@@ -321,14 +321,14 @@ class MotionProfile(ABC):
         t3_arr, s3_arr, _ = position(t3, self._decel_fun, t2, v2, s2)
         
         if t2_arr is None:
-            t_arr = np.concatenate((t1_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t3_arr))
         else:
-            t_arr = np.concatenate((t1_arr, t2_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t2_arr[:-1], t3_arr))
         
         if s2_arr is None:
-            s_arr = np.concatenate((s1_arr, s3_arr))
+            s_arr = np.concatenate((s1_arr[:-1], s3_arr))
         else:
-            s_arr = np.concatenate((s1_arr, s2_arr, s3_arr))
+            s_arr = np.concatenate((s1_arr[:-1], s2_arr[:-1], s3_arr))
         
         return t_arr, s_arr
 
@@ -364,14 +364,14 @@ class MotionProfile(ABC):
         a3_arr = np.array([self._decel_fun(t) for t in t3_arr])
         
         if t2_arr is None:
-            t_arr = np.concatenate((t1_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t3_arr))
         else:
-            t_arr = np.concatenate((t1_arr, t2_arr, t3_arr))
+            t_arr = np.concatenate((t1_arr[:-1], t2_arr[:-1], t3_arr))
             
         if a2_arr is None:
-            a_arr = np.concatenate((a1_arr, a2_arr, a3_arr))
+            a_arr = np.concatenate((a1_arr[:-1], a3_arr))
         else:
-            a_arr = np.concatenate((a1_arr, a2_arr, a3_arr))
+            a_arr = np.concatenate((a1_arr[:-1], a2_arr[:-1], a3_arr))
             
         return t_arr, a_arr
 
@@ -426,8 +426,9 @@ class MotionProfile(ABC):
             try:
                 s = interp(t)
             except ValueError:
-                # noinspection PyTypeChecker
-                return s_ax[-1]
+                s = s_ax[0]
+                if t > t_ax[-1]:
+                    s = s_ax[-1]
             return s
 
         return f
@@ -455,8 +456,9 @@ class MotionProfile(ABC):
             try:
                 t = interp(s)
             except ValueError:
-                # noinspection PyTypeChecker
-                return t_ax[-1]
+                t = t_ax[0]
+                if s > s_ax[-1]:
+                    t = t_ax[-1]
             return t
         
         return f
