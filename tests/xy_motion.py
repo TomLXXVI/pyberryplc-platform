@@ -36,6 +36,7 @@ def main():
     p1 = (0.0, 0.0)    
     p2 = (0.02, 0.02)  
     pitch = get_pitch(1, 0.01)
+    print(pitch)
     omega = 45.0  # deg / s
     
     motion_x, motion_y = xy_motion_control(p1, p2, pitch, omega, 0.2, "trapezoidal")

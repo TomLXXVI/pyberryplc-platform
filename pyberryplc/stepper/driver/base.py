@@ -156,9 +156,15 @@ class FixedRotator(BlockingRotator):
         self._write_direction()
         self._generate_delays()
         self._start_time = time.perf_counter()
+
+        t_ref = self._start_time
         for delay in self._delays:
+            t_ref += delay
             self._pulse_step_pin()
-            time.sleep(delay)
+
+            while time.perf_counter() < t_ref:
+                pass
+        
         self._end_time = time.perf_counter()
         self._busy = False
 
@@ -204,10 +210,15 @@ class FixedRotatorThreaded(NonBlockingRotator):
         self._busy = True
         self._write_direction()
         self._start_time = time.perf_counter()
+
+        t_ref = self._start_time
         while self._queue:
-            delay = self._queue.popleft()
+            t_ref += self._queue.popleft()
             self._pulse_step_pin()
-            time.sleep(delay)
+
+            while time.perf_counter() < t_ref:
+                pass
+        
         self._end_time = time.perf_counter()
         self._busy = False
 
@@ -251,9 +262,15 @@ class ProfileRotator(Rotator):
         self._busy = True
         self._write_direction()
         self._start_time = time.perf_counter()
+        
+        t_ref = self._start_time
         for delay in self._delays:
+            t_ref += delay
             self._pulse_step_pin()
-            time.sleep(delay)
+            
+            while time.perf_counter() < t_ref:
+                pass
+            
         self._end_time = time.perf_counter()
         self._busy = False
     
@@ -296,10 +313,15 @@ class ProfileRotatorThreaded(NonBlockingRotator):
         self._busy = True
         self._write_direction()
         self._start_time = time.perf_counter()
+
+        t_ref = self._start_time
         while self._queue:
-            delay = self._queue.popleft()
+            t_ref += self._queue.popleft()
             self._pulse_step_pin()
-            time.sleep(delay)
+
+            while time.perf_counter() < t_ref:
+                pass
+        
         self._end_time = time.perf_counter()
         self._busy = False
 

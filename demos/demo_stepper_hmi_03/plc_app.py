@@ -1,7 +1,6 @@
-import time
+import logging
 from multiprocessing import Pipe
 
-from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.core import AbstractPLC, SharedData
 from pyberryplc.stepper import (
     TMC2208StepperMotor,
@@ -16,10 +15,8 @@ class XYMotionPLC(AbstractPLC):
     def __init__(
         self,
         shared_data: SharedData,
-        port_x: str = "/dev/ttyUSB1",
-        port_y: str = "/dev/ttyUSB0"
+        logger: logging.Logger,
     ) -> None:
-        logger = init_logger("XYMotionPLC")
         super().__init__(shared_data=shared_data, logger=logger)
 
         # Create pipes for interprocess communication
@@ -29,7 +26,7 @@ class XYMotionPLC(AbstractPLC):
         def _config_motor(motor: TMC2208StepperMotor) -> None:
             motor.enable(high_sensitivity=True)
             motor.configure_microstepping(
-                resolution="1/16",
+                resolution="full",
                 ms_pins=None,
                 full_steps_per_rev=200
             )
@@ -37,8 +34,11 @@ class XYMotionPLC(AbstractPLC):
                 run_current_pct=35.0,
                 hold_current_pct=10.0
             )
-        
+
         # Launch stepping motor processes
+        port_x: str = "/dev/ttyUSB1"
+        port_y: str = "/dev/ttyUSB0"
+
         self._proc_x = StepperMotorProcess(
             conn=px_child,
             motor_class=TMC2208StepperMotor,
@@ -87,36 +87,47 @@ class XYMotionPLC(AbstractPLC):
     def _init_control(self):
         if not self._init_flag:
             self._init_flag = True
+
             self._proc_x.start()
             self._proc_y.start()
+                           
             self.X0.activate()
 
     def _sequence_control(self):
         # Check for 'done' messages from motor subprocesses
         if self._px_parent.poll():
             msg = self._px_parent.recv()
-            if msg.get("status") == "ready":
+            status = msg.get("status")
+            if status == "ready":
                 self._x_prepared = True
-            elif msg.get("status") == "done":
+            elif status == "done":
                 self._x_busy = False
                 self._x_prepared = False
                 self.travel_time_x.update(msg.get("travel_time", float('nan')))
-                
+            elif status == "startup_error":
+                self.logger.error(f"[motor X] Startup error: {msg.get('message', 'No message')}")
+                raise RuntimeError("Startup error in motor X")
+        
         if self._py_parent.poll():
             msg = self._py_parent.recv()
-            if msg.get("status") == "ready":
+            status = msg.get("status")
+            if status == "ready":
                 self._y_prepared = True
-            elif msg.get("status") == "done":
+            elif status == "done":
                 self._y_busy = False
                 self._y_prepared = False
                 self.travel_time_y.update(msg.get("travel_time", float('nan')))
-
+            elif status == "startup_error":
+                self.logger.error(f"[motor Y] Startup error: {msg.get('message', 'No message')}")
+                raise RuntimeError("Startup error in motor Y")
+        
         # Update HMI output markers
         self.motor_x_ready.update(self._x_prepared)
         self.motor_x_busy.update(self._x_busy)
         self.motor_y_ready.update(self._y_prepared)
         self.motor_y_busy.update(self._y_busy)
-
+        
+        # Transition logic
         if self.X0.active and self.start_motion.active:
             self.logger.info("Initialize motion")
             self.X0.deactivate()

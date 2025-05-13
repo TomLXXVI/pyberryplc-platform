@@ -185,7 +185,6 @@ class AbstractHMI(ABC):
         raises a PLC fault should the PLC thread suddenly die (i.e. when no 
         clean exit was requested).
         """
-
         def _plc_monitor_thread_fn():
             while True:
                 if not self._plc_thread.is_alive() and not self._clean_exit:
@@ -203,38 +202,15 @@ class AbstractHMI(ABC):
     def _plc_watchdog_fn(self) -> None:
         if self._plc_fault:
             self._plc_crash_dialog.open()
-        else:
-            self._plc_crash_dialog.close()
-
+    
     def _start_plc(self) -> None:
         """Launch PLC application."""
         self._start_plc_thread()
         self._start_plc_monitor_thread()
         ui.timer(1.0, self._plc_watchdog_fn)  # PLC watchdog
     
-    def _create_plc_crash_dialog(self) -> None:
-        self._plc_crash_dialog = ui.dialog().classes("w-[400px]")
-        with self._plc_crash_dialog:
-            with ui.card():
-                ui.label(
-                    "⚠️ A critical PLC error has occurred. "
-                    "Please check the log for details."
-                ).classes(
-                    "text-red-600 font-bold"
-                )
-                with ui.row().classes("mt-4 justify-end"):
-                    ui.button(
-                        "Turn-off PLC", 
-                        on_click=self.abort_hmi
-                    )
-                    ui.button(
-                        "Restart PLC", 
-                        color="red", 
-                        on_click=self.restart_plc
-                    )
-    
     def _build_ui(self) -> None:
-        self._create_plc_crash_dialog()
+        self._plc_crash_dialog = PLCCrashDialog(self)
         with self._main_area:
             self.build_ui()
         self._log_area = ui.column().classes(
@@ -278,3 +254,68 @@ class AbstractHMI(ABC):
             "document.getElementById('log_area').scrollTop = "
             "document.getElementById('log_area').scrollHeight;"
         )
+
+class PLCCrashDialog:
+    
+    def __init__(self, parent: AbstractHMI):
+        self.parent = parent
+        self._create_dialog()
+    
+    def _create_dialog(self):
+        self._dialog = ui.dialog().classes("w-[400px]")
+        with self._dialog:
+            with ui.card():
+                ui.label(
+                    "⚠️ A critical PLC error has occurred. "
+                    "Please check the log for details."
+                ).classes("text-red-600 font-bold")
+                with ui.row().classes("mt-4 justify-end"):
+                    ui.button(
+                        "Turn-off PLC",
+                        on_click=self._abort_hmi
+                    )
+                    ui.button(
+                        "Restart PLC",
+                        color="red",
+                        on_click=self._restart_plc
+                    )
+    
+    def _abort_hmi(self) -> None:
+        self.close()
+        self.parent.abort_hmi()
+    
+    def _restart_plc(self) -> None:
+        self.close()
+        self.parent.restart_plc()
+    
+    def open(self) -> None:
+        self._dialog.open()
+    
+    def close(self) -> None:
+        self._dialog.close()
+    
+
+class ErrorDialog:
+    
+    def __init__(self, message: str):
+        self.message = message
+        self._create_dialog()
+
+    def _create_dialog(self):
+        self._dialog = ui.dialog().classes("w-[400px]")
+        with self._dialog:
+            with ui.card():
+                ui.label(f"⚠️ Error").classes("text-red-600 font-bold")
+                ui.label(self.message).classes("font-bold")
+                with ui.row().classes("mt-4 justify-center"):
+                    ui.button(
+                        "Close",
+                        color="red",
+                        on_click=self.close
+                    )
+    
+    def open(self):
+        self._dialog.open()
+
+    def close(self) -> None:
+        self._dialog.close()

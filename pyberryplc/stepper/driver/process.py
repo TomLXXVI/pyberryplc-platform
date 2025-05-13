@@ -65,10 +65,20 @@ class StepperMotorProcess(multiprocessing.Process):
         motor = self.motor_class(**self.motor_kwargs)
         motor.rotator = ProfileRotatorProcess(motor)
         
-        if self.config_callback is not None:
-            self.config_callback(motor)
-        else:
-            motor.enable()
+        try:
+            if self.config_callback is not None:
+                self.config_callback(motor)
+            else:
+                motor.enable()
+        except Exception as e:
+            error_msg = f"{type(e).__name__}: {e}"
+            motor.logger.error(error_msg)
+            self.conn.send({
+                "status": "startup_error",
+                "name": self.name,
+                "message": error_msg
+            })
+            return
         
         prepared = False
         
@@ -86,7 +96,7 @@ class StepperMotorProcess(multiprocessing.Process):
             if cmd == "prepare_profile":
                 profile: MotionProfile = msg["profile"]
                 direction: str = msg.get("direction", "forward")
-                if direction == Direction.COUNTERCLOCKWISE:
+                if direction == "forward":
                     motor.rotator.preprocess(Direction.COUNTERCLOCKWISE, profile)
                 else:
                     motor.rotator.preprocess(Direction.CLOCKWISE, profile)

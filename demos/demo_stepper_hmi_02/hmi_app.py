@@ -152,4 +152,3 @@ class StepperHMI(AbstractHMI):
     def update_status(self) -> None:
         motor_busy = self.shared_data.hmi_digital_outputs["motor_busy"]
         self.status_label.text = "Motor running" if motor_busy else "Motor stopped"
-   

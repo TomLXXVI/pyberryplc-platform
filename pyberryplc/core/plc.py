@@ -589,7 +589,10 @@ class AbstractPLC(ABC):
         to `self.shared_data`.
         """
         for name, mem_var in self.hmi_output_register.items():
-            self.shared_data.hmi_digital_outputs[name] = mem_var.curr_state
+            if mem_var.single_bit:
+                self.shared_data.hmi_digital_outputs[name] = mem_var.curr_state
+            else:
+                self.shared_data.hmi_analog_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
         """At the start of each new PLC scan cycle, the values in the "current 
