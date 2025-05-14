@@ -1,4 +1,3 @@
-from nicegui import ui
 import plotly.graph_objects as go
 
 from pyberryplc.hmi import AbstractHMI
@@ -11,7 +10,7 @@ from plc_app import StepperMotorPLC
 
 class StepperHMI(AbstractHMI):
     
-    def __init__(self):
+    def __init__(self, app, ui):
         # Define the data that will be shared between PLC and HMI.
         shared_data = SharedData(
             hmi_buttons={"start_motion": False},
@@ -26,7 +25,6 @@ class StepperHMI(AbstractHMI):
         self.profile_type: ui.select | None = None
         self.plot: ui.plotly | None = None
         self.warning_label: ui.label | None = None
-        self.status_label: ui.label | None = None
         
         # Initial motion profile.
         self.motion_profile = TrapezoidalProfile(
@@ -50,51 +48,51 @@ class StepperHMI(AbstractHMI):
         
         super().__init__(
             title="Stepper Motor Demo",
+            app=app,
+            ui=ui,
             shared_data=shared_data,
             plc_app=StepperMotorPLC,
             logger=init_logger(console=False),
             port=8081
         )
     
-    def build_ui(self) -> None:
-        ui.label("Stepper Motor Demo").classes("text-2xl font-bold mb-4")
+    def build_gui(self) -> None:
+        self.ui.label("Stepper Motor Demo").classes("text-2xl font-bold mb-4")
         
-        with ui.column().style("width: 800px"):
-            with ui.row().classes("justify-between w-[800px]"):
-                self.ds_tot_input = ui.number(
+        with self.ui.column().style("width: 800px"):
+            with self.ui.row().classes("justify-between w-[800px]"):
+                self.ds_tot_input = self.ui.number(
                     label="Travel distance [°]",
                     value=self.motion_profile.ds_tot,
                     on_change=self._update_plot
                 )
-                self.dt_tot_input = ui.number(
+                self.dt_tot_input = self.ui.number(
                     label="Travel time [s]",
                     value=self.motion_profile.dt_tot,
                     on_change=self._update_plot
                 )
-                self.dt_acc_input = ui.number(
+                self.dt_acc_input = self.ui.number(
                     label="Acceleration time [s]",
                     value=self.motion_profile.dt_acc,
                     on_change=self._update_plot
                 )
-                self.profile_type = ui.select(
+                self.profile_type = self.ui.select(
                     ["trapezoidal", "S-curve"],
                     label="Motion profile type",
                     value="trapezoidal",
                     on_change=self._update_plot
                 ).classes("w-52")
     
-            with ui.row().classes("justify-center"):
-                self.plot = ui.plotly(self.fig).classes("w-[800px] h-[400px]")
+            with self.ui.row().classes("justify-center"):
+                self.plot = self.ui.plotly(self.fig).classes("w-[800px] h-[400px]")
         
-        with ui.column():
-            self.warning_label = ui.label().classes("text-red-600 mt-1")
-            self.status_label = ui.label("Motor status")
+        with self.ui.column():
+            self.warning_label = self.ui.label().classes("text-red-600 mt-1")
+         
+        with self.ui.row():
+            self.ui.button("Start motion", on_click=self._start_motion)
         
-        with ui.row():
-            ui.button("Start motion", on_click=self._start_motion)
-            ui.button("Exit HMI", on_click=self.exit_hmi)
-        
-        ui.separator().classes("my-4")
+        self.ui.separator().classes("my-4")
     
     def _start_motion(self) -> None:
         # Send data to PLC
@@ -151,4 +149,4 @@ class StepperHMI(AbstractHMI):
     
     def update_status(self) -> None:
         motor_busy = self.shared_data.hmi_digital_outputs["motor_busy"]
-        self.status_label.text = "Motor running" if motor_busy else "Motor stopped"
+        self.status_html.set_content("Motor running" if motor_busy else "Motor stopped")
