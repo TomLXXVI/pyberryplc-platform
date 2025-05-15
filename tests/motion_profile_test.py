@@ -1,11 +1,11 @@
-from pyberryplc.motion import TrapezoidalProfile
+from pyberryplc.motion.single_axis import TrapezoidalProfile
 
 from charts import LineChart
 
 p = TrapezoidalProfile(
     ds_tot=720.0,
     dt_tot=2.0,
-    dt_acc=0.5
+    dt_ini=0.5
 )
 t_ax, v_ax = p.velocity_profile()
 
@@ -32,7 +32,7 @@ angles = [
     start_angle + i * step_angle 
     for i in range(int(final_angle / step_angle))
 ]
-times = list(map(p.get_fn_time_from_position(), angles))
+times = list(map(p.get_time_position_fn(), angles))
 delays = [t2 - t1 for t1, t2 in zip(times, times[1:])]
 
 

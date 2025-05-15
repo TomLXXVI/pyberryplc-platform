@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion import TrapezoidalProfile, SCurvedProfile
+from pyberryplc.motion.single_axis import TrapezoidalProfile, SCurvedProfile
 
 from plc_app import StepperMotorPLC
 
@@ -30,7 +30,7 @@ class StepperHMI(AbstractHMI):
         self.motion_profile = TrapezoidalProfile(
             ds_tot=720.0,
             dt_tot=2.0,
-            dt_acc=0.5
+            dt_ini=0.5
         )
         
         # Figure of initial motion profile.
@@ -73,7 +73,7 @@ class StepperHMI(AbstractHMI):
                 )
                 self.dt_acc_input = self.ui.number(
                     label="Acceleration time [s]",
-                    value=self.motion_profile.dt_acc,
+                    value=self.motion_profile.dt_ini,
                     on_change=self._update_plot
                 )
                 self.profile_type = self.ui.select(
@@ -120,7 +120,7 @@ class StepperHMI(AbstractHMI):
             profile_params = {
                 'ds_tot': ds_tot,
                 'dt_tot': dt_tot,
-                'dt_acc': dt_acc
+                'dt_ini': dt_acc
             }
             self.motion_profile = None
             match self.profile_type.value:

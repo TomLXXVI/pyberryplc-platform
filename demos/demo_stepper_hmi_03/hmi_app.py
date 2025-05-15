@@ -3,7 +3,7 @@ import math
 from pyberryplc.hmi import AbstractHMI, ErrorDialog
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.control import xy_motion_control
+from pyberryplc.motion.multi_axis import xy_motion_control
 
 from plc_app import XYMotionPLC
 
@@ -71,7 +71,7 @@ class XYMotionHMI(AbstractHMI):
             with self.ui.row():
                 self.pitch = self.ui.number("Pitch [rev/m]", value=100)
                 self.omega = self.ui.number("Speed [°/s]", value=45.0)
-                self.dt_acc = self.ui.number("Acceleration time [s]", value=0.2)
+                self.dt_acc = self.ui.number("Acceleration [°/s²]", value=360)
 
         with self.ui.row():
             self.ui.button("Start", on_click=self._start_motion)
@@ -81,11 +81,11 @@ class XYMotionHMI(AbstractHMI):
         p2 = (self.p2_x.value, self.p2_y.value)
         pitch = self.pitch.value
         omega = self.omega.value
-        dt_acc = self.dt_acc.value
+        alpha = self.dt_acc.value
         profile_type = self.profile.value
         
         try:
-            mp_x, mp_y = xy_motion_control(p1, p2, pitch, omega, dt_acc, profile_type)
+            mp_x, mp_y = xy_motion_control(p1, p2, pitch, omega, alpha, profile_type)
         except Exception as e:
             msg = f"Calculation of motion profiles failed: {e}"
             ErrorDialog(self, msg).open()

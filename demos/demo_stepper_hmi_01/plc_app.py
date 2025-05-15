@@ -7,7 +7,7 @@ from pyberryplc.stepper import (
     RotatorType,
     Direction
 )
-from pyberryplc.motion import TrapezoidalProfile
+from pyberryplc.motion.single_axis import TrapezoidalProfile
 
 
 class StepperMotorPLC(AbstractPLC):
@@ -26,7 +26,7 @@ class StepperMotorPLC(AbstractPLC):
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
         self.stepper.attach_rotator(RotatorType.DYNAMIC_THREADED)
-        self.stepper.rotator.profile = TrapezoidalProfile(v_m=90.0, dt_acc=0.5, dt_tot=720.0)
+        self.stepper.rotator.profile = TrapezoidalProfile(v_m=90.0, dt_ini=0.5, dt_tot=720.0)
         
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")

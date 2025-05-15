@@ -9,7 +9,6 @@ References
 ----------
 Gürocak, H. (2016), Industrial Motion Control, John Wiley & Sons.
 """
-from __future__ import annotations
 from typing import Callable
 from abc import ABC, abstractmethod
 
@@ -17,7 +16,6 @@ import numpy as np
 import scipy
 
 from .kinematics import position, velocity
-
 
 
 class ConfigError(Exception):
@@ -52,13 +50,13 @@ class MotionProfile(ABC):
         Total travel distance.
     `dt_tot`:
         Total travel time.
-    `dt_acc`:
+    `dt_ini`:
         Acceleration time.
-    `ds_acc`:
+    `ds_ini`:
         Acceleration distance.
-    `dt_dec`:
+    `dt_fin`:
         Deceleration time (always equal to acceleration time).
-    `ds_dec`:
+    `ds_fin`:
         Deceleration distance (always equal to acceleration distance).
     `dt_cov`:
         Constant velocity time, i.e. the time between the acceleration time
@@ -78,7 +76,7 @@ class MotionProfile(ABC):
         a_m: float | None = None,
         dt_tot: float | None = None,
         ds_tot: float | None = None,
-        dt_acc: float | None = None
+        dt_ini: float | None = None
     ) -> None:
         """Creates a `MotionProfile` object.
 
@@ -92,7 +90,7 @@ class MotionProfile(ABC):
             Total travel time (motion time).
         ds_tot:
             Total travel distance.
-        dt_acc:
+        dt_ini:
             Acceleration time.
 
         A motion profile can be defined in four different ways:
@@ -112,20 +110,20 @@ class MotionProfile(ABC):
         self.a_m = a_m
         self.ds_tot = ds_tot
         self.dt_tot = dt_tot
-        self.ds_acc = None
-        self.dt_acc = dt_acc
-        self.ds_dec = None
-        self.dt_dec = None
+        self.ds_ini = None
+        self.dt_ini = dt_ini
+        self.ds_fin = None
+        self.dt_fin = None
         self.ds_cov = None
         self.dt_cov = None
         
         # Given: v_m and dt_acc -> determine a_m 
-        if (self.a_m is None) and (self.v_m is not None) and (self.dt_acc is not None):
+        if (self.a_m is None) and (self.v_m is not None) and (self.dt_ini is not None):
             self.a_m = self._calc_accel()
         
         # Given: a_m -> determine dt_acc
-        if (self.dt_acc is None) and (self.a_m is not None):
-            self.dt_acc = self._calc_accel_duration()
+        if (self.dt_ini is None) and (self.a_m is not None):
+            self.dt_ini = self._calc_accel_duration()
 
         # Use case 1 - Determine total travel time.
         # Given: v_m, a_m, and ds_tot.
@@ -138,7 +136,7 @@ class MotionProfile(ABC):
             self._calc_total_travel_distance()
         
         # Use case 3 - Determine required acceleration.
-        elif all([self.dt_acc, self.dt_tot, self.ds_tot]):
+        elif all([self.dt_ini, self.dt_tot, self.ds_tot]):
             self._calc_required_acceleration()
         
         # Use case 4 - Determine minimum acceleration and corresponding top 
@@ -174,14 +172,14 @@ class MotionProfile(ABC):
 
     def _calc_total_travel_time(self) -> None:
         # acceleration phase
-        self.ds_acc = self._calc_accel_distance()
+        self.ds_ini = self._calc_accel_distance()
         
         # deceleration phase
-        self.dt_dec = self._calc_decel_duration()
-        self.ds_dec = self.ds_acc
+        self.dt_fin = self._calc_decel_duration()
+        self.ds_fin = self.ds_ini
         
         # constant velocity phase
-        self.ds_cov = self.ds_tot - self.ds_acc - self.ds_dec
+        self.ds_cov = self.ds_tot - self.ds_ini - self.ds_fin
         if self.ds_cov < 0:
             raise DistanceError(
                 "Not enough travel distance available for acceleration "
@@ -190,18 +188,18 @@ class MotionProfile(ABC):
         self.dt_cov = self._calc_cst_veloc_duration()
         
         # total travel time
-        self.dt_tot = self.dt_acc + self.dt_cov + self.dt_dec
+        self.dt_tot = self.dt_ini + self.dt_cov + self.dt_fin
 
     def _calc_total_travel_distance(self) -> None:
         # acceleration phase
-        self.ds_acc = self._calc_accel_distance()
+        self.ds_ini = self._calc_accel_distance()
         
         # deceleration phase
-        self.dt_dec = self.dt_acc
-        self.ds_dec = self.ds_acc
+        self.dt_fin = self.dt_ini
+        self.ds_fin = self.ds_ini
         
         # constant velocity phase
-        self.dt_cov = self.dt_tot - self.dt_acc - self.dt_dec
+        self.dt_cov = self.dt_tot - self.dt_ini - self.dt_fin
         if self.dt_cov < 0:
             raise TimingError(
                 "Not enough travel time available for acceleration and "
@@ -210,35 +208,35 @@ class MotionProfile(ABC):
         self.ds_cov = self._calc_cst_veloc_distance()
         
         # total travel distance
-        self.ds_tot = self.ds_acc + self.ds_cov + self.ds_dec
+        self.ds_tot = self.ds_ini + self.ds_cov + self.ds_fin
 
     def _calc_minimum_acceleration(self) -> None:
         self.v_m = 2 * self.ds_tot / self.dt_tot
         self.a_m = 2 * self.v_m / self.dt_tot
         
         # acceleration phase
-        self.ds_acc = self._calc_accel_distance()
+        self.ds_ini = self._calc_accel_distance()
         
         # deceleration phase
-        self.dt_dec = self.dt_acc
-        self.ds_dec = self.ds_acc
+        self.dt_fin = self.dt_ini
+        self.ds_fin = self.ds_ini
         
         # constant velocity phase
         self.dt_cov = 0.0
         self.ds_cov = 0.0
     
     def _calc_required_acceleration(self):
-        self.dt_dec = self.dt_acc
-        self.dt_cov = self.dt_tot - self.dt_acc - self.dt_dec
-        self.v_m = self.ds_tot / (self.dt_cov + self.dt_acc)
+        self.dt_fin = self.dt_ini
+        self.dt_cov = self.dt_tot - self.dt_ini - self.dt_fin
+        self.v_m = self.ds_tot / (self.dt_cov + self.dt_ini)
         self.ds_cov = self.v_m * self.dt_cov
-        self.ds_acc = (self.ds_tot - self.ds_cov) / 2
-        self.ds_dec = self.ds_acc
+        self.ds_ini = (self.ds_tot - self.ds_cov) / 2
+        self.ds_fin = self.ds_ini
         self.a_m = self._calc_accel()
 
     def _calc_accel_distance(self) -> float:
         t0 = 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         v0 = 0.0
         s0 = 0.0
         _, s, _ = position(t1, self._accel_fun, t0, v0, s0)
@@ -264,7 +262,7 @@ class MotionProfile(ABC):
         """
         # acceleration phase
         t0, v0 = 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t1_arr, v1_arr = velocity(t1, self._accel_fun, t0, v0)
         
         # constant velocity phase
@@ -278,7 +276,7 @@ class MotionProfile(ABC):
             t2, v2 = float(t1_arr[-1]), float(v1_arr[-1])
         
         # deceleration phase
-        t3 = t2 + self.dt_dec
+        t3 = t2 + self.dt_fin
         t3_arr, v3_arr = velocity(t3, self._decel_fun, t2, v2)
         
         if t2_arr is None:
@@ -303,7 +301,7 @@ class MotionProfile(ABC):
         """
         # acceleration phase
         t0, v0, s0 = 0.0, 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t1_arr, s1_arr, v1_arr = position(t1, self._accel_fun, t0, v0, s0)
         
         # constant velocity phase
@@ -317,7 +315,7 @@ class MotionProfile(ABC):
             t2, v2, s2 = float(t1_arr[-1]), float(v1_arr[-1]), float(s1_arr[-1])
         
         # deceleration phase
-        t3 = t2 + self.dt_dec
+        t3 = t2 + self.dt_fin
         t3_arr, s3_arr, _ = position(t3, self._decel_fun, t2, v2, s2)
         
         if t2_arr is None:
@@ -342,7 +340,7 @@ class MotionProfile(ABC):
         """
         # acceleration phase
         t0, a0 = 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t1_arr = np.linspace(t0, t1, endpoint=True)
         a1_arr = np.array([self._accel_fun(t) for t in t1_arr])
         
@@ -359,7 +357,7 @@ class MotionProfile(ABC):
             t2, a2 = float(t1_arr[-1]), float(a1_arr[-1])
         
         # deceleration phase
-        t3 = t2 + self.dt_dec
+        t3 = t2 + self.dt_fin
         t3_arr = np.linspace(t2, t3, endpoint=True)
         a3_arr = np.array([self._decel_fun(t) for t in t3_arr])
         
@@ -375,7 +373,7 @@ class MotionProfile(ABC):
             
         return t_arr, a_arr
 
-    def get_fn_velocity_from_time(
+    def get_velocity_time_fn(
         self,
         N: float | None = None
     ) -> Callable[[float], float]:
@@ -403,7 +401,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_fn_position_from_time(
+    def get_position_time_fn(
         self,
         N: float | None = None
     ) -> Callable[[float], float]:
@@ -433,7 +431,7 @@ class MotionProfile(ABC):
 
         return f
     
-    def get_fn_time_from_position(
+    def get_time_position_fn(
         self,
         N: float | None = None
     ) -> Callable[[float], float]:
@@ -463,7 +461,7 @@ class MotionProfile(ABC):
         
         return f
     
-    def get_accel_fn_velocity_from_time(self) -> Callable[[float], float]:
+    def get_ini_velocity_time_fn(self) -> Callable[[float], float]:
         """Returns a function that takes a time moment `t` in seconds and 
         returns the velocity `v` at that moment during the acceleration phase
         of the movement (`0 <= t <= dt_acc`).
@@ -471,7 +469,7 @@ class MotionProfile(ABC):
         velocity during the constant-velocity phase.
         """
         t0, v0 = 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t_arr, v_arr = velocity(t1, self._accel_fun, t0, v0)
         v_max = v_arr[-1]
         
@@ -488,7 +486,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_decel_fn_velocity_from_time(
+    def get_fin_velocity_time_fn(
         self, 
         t0: float, 
         v0: float
@@ -504,7 +502,7 @@ class MotionProfile(ABC):
         v0: float
             Initial velocity at the start of the deceleration phase.
         """
-        t1 = t0 + self.dt_dec
+        t1 = t0 + self.dt_fin
         t_arr, v_arr = velocity(t1, self._decel_fun, t0, v0)
 
         interp = scipy.interpolate.interp1d(t_arr, v_arr)
@@ -521,12 +519,12 @@ class MotionProfile(ABC):
 
         return f
     
-    def get_accel_fn_time_from_position(self) -> Callable[[float], float]:
+    def get_ini_time_position_fn(self) -> Callable[[float], float]:
         """Returns a function that takes a position `s` and returns the time 
         moment `t` in seconds when this position is reached.
         """
         t0, v0, s0 = 0.0, 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t_arr, s_arr, v_arr = position(t1, self._accel_fun, t0, v0, s0)
         t_min = t_arr[0]
         t_max = t_arr[-1]
@@ -545,12 +543,12 @@ class MotionProfile(ABC):
 
         return f
     
-    def get_accel_fn_time_from_velocity(self) -> Callable[[float], float]:
+    def get_ini_time_velocity_fn(self) -> Callable[[float], float]:
         """Returns a function that takes a velocity `v` and returns the 
         time moment `t` in seconds when this velocity is reached.
         """
         t0, v0, s0 = 0.0, 0.0, 0.0
-        t1 = t0 + self.dt_acc
+        t1 = t0 + self.dt_ini
         t_arr, s_arr, v_arr = position(t1, self._accel_fun, t0, v0, s0)
         t_min = t_arr[0]
         t_max = t_arr[-1]
@@ -569,7 +567,7 @@ class MotionProfile(ABC):
 
         return f
     
-    def get_decel_fn_time_from_position(
+    def get_fin_time_position_fn(
         self, 
         t0: float, 
         s0: float, 
@@ -587,7 +585,7 @@ class MotionProfile(ABC):
         v0: float
             Initial velocity at the start of the deceleration phase.
         """
-        t1 = t0 + self.dt_dec
+        t1 = t0 + self.dt_fin
         t_arr, v_arr = velocity(t1, self._decel_fun, t0, v0)
 
         # Between t0 and t1 it is possible for the velocity to become negative
@@ -618,7 +616,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_decel_fn_time_from_velocity(
+    def get_fin_time_velocity_fn(
         self, 
         t0: float, 
         s0: float, 
@@ -636,7 +634,7 @@ class MotionProfile(ABC):
         v0: float
             Initial velocity at the start of the deceleration phase.
         """
-        t1 = t0 + self.dt_dec
+        t1 = t0 + self.dt_fin
         t_arr, v_arr = velocity(t1, self._decel_fun, t0, v0)
 
         # Between t0 and t1 it is possible for the velocity to become negative
@@ -682,10 +680,10 @@ class TrapezoidalProfile(MotionProfile):
         return dt_acc
 
     def _calc_decel_duration(self) -> float:
-        return self.dt_acc
+        return self.dt_ini
 
     def _calc_accel(self) -> float:
-        return self.v_m / self.dt_acc
+        return self.v_m / self.dt_ini
 
 
 class SCurvedProfile(MotionProfile):
@@ -695,8 +693,8 @@ class SCurvedProfile(MotionProfile):
     def _accel_fun(self, t: float) -> float:
         c1 = self.a_m ** 2 / self.v_m
         t0 = 0.0
-        t1 = t0 + self.dt_acc / 2
-        t2 = t1 + self.dt_acc / 2
+        t1 = t0 + self.dt_ini / 2
+        t2 = t1 + self.dt_ini / 2
         if t0 <= t <= t1:
             return c1 * t
         elif t1 < t <= t2:
@@ -706,9 +704,9 @@ class SCurvedProfile(MotionProfile):
 
     def _decel_fun(self, t: float) -> float:
         c1 = self.a_m ** 2 / self.v_m
-        t0 = self.dt_acc + self.dt_cov
-        t1 = t0 + self.dt_dec / 2
-        t2 = t1 + self.dt_dec / 2
+        t0 = self.dt_ini + self.dt_cov
+        t1 = t0 + self.dt_fin / 2
+        t2 = t1 + self.dt_fin / 2
         if t0 <= t <= t1:
             return -c1 * (t - t0)
         elif t1 < t <= t2:
@@ -721,7 +719,7 @@ class SCurvedProfile(MotionProfile):
         return dt_acc
 
     def _calc_decel_duration(self) -> float:
-        return self.dt_acc
+        return self.dt_ini
 
     def _calc_accel(self) -> float:
-        return 2 * self.v_m / self.dt_acc
+        return 2 * self.v_m / self.dt_ini

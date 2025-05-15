@@ -15,7 +15,7 @@ from pyberryplc.stepper import (
     RotatorType,
     Direction
 )
-from pyberryplc.motion.profile import TrapezoidalProfile
+from pyberryplc.motion.single_axis import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
 

@@ -1,9 +1,8 @@
-import time
 from typing import Any, Callable, TypeVar
 import multiprocessing
 from multiprocessing.connection import Connection
 
-from pyberryplc.motion import MotionProfile
+from pyberryplc.motion.multi_axis import MotionProfile
 from .base import StepperMotor, ProfileRotator, Direction
 
 

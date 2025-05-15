@@ -8,7 +8,7 @@ import threading
 from collections import deque
 
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
-from pyberryplc.motion.profile import MotionProfile
+from pyberryplc.motion.multi_axis import MotionProfile
 from pyberryplc.motion.dynamic_generator import DynamicDelayGenerator
 
 
@@ -255,7 +255,7 @@ class ProfileRotator(Rotator):
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
         angles = [i * step_angle for i in range(num_steps + 1)]
-        times = list(map(self._motion_profile.get_fn_time_from_position(), angles))
+        times = list(map(self._motion_profile.get_time_position_fn(), angles))
         self._delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
 
     def _step_loop(self) -> None:
@@ -305,7 +305,7 @@ class ProfileRotatorThreaded(NonBlockingRotator):
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
         angles = [i * step_angle for i in range(num_steps + 1)]
-        times = list(map(self._motion_profile.get_fn_time_from_position(), angles))
+        times = list(map(self._motion_profile.get_time_position_fn(), angles))
         delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
         self._queue = deque(delays)
 

@@ -7,7 +7,7 @@ from pyberryplc.stepper import (
     RotatorType,
     Direction
 )
-from pyberryplc.motion import TrapezoidalProfile
+from pyberryplc.motion.single_axis import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
 
@@ -32,7 +32,7 @@ class StepperUARTTestPLC(AbstractPLC):
         self.stepper.rotator.profile = TrapezoidalProfile(
             ds_tot=180,
             dt_tot=1,
-            dt_acc=0.25
+            dt_ini=0.25
         )
 
         self.X0 = self.add_marker("X0")
