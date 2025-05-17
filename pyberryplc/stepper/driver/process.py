@@ -1,5 +1,6 @@
 from typing import Any, Callable, TypeVar
 import multiprocessing
+# noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 
 from pyberryplc.motion.multi_axis import MotionProfile

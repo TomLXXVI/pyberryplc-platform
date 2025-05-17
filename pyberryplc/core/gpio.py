@@ -7,7 +7,10 @@ import pigpio
 
 
 class GPIO(ABC):
-    def_pin_factory = PiGPIOFactory()
+    try:
+        def_pin_factory = PiGPIOFactory()
+    except OSError:
+        def_pin_factory = None
     
     def __init__(
         self, 

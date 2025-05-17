@@ -8,27 +8,8 @@ import threading
 from collections import deque
 
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
-from pyberryplc.motion.multi_axis import MotionProfile
+from pyberryplc.motion.multi_axis import MotionProfile, Direction
 from pyberryplc.motion.dynamic_generator import DynamicDelayGenerator
-
-
-class Direction(StrEnum):
-    CLOCKWISE = "clockwise"
-    COUNTERCLOCKWISE = "counterclockwise"
-
-    def to_bool(self) -> bool:
-        """Returns True if direction is counterclockwise, False otherwise."""
-        return self == Direction.COUNTERCLOCKWISE
-
-    def to_int(self) -> int:
-        """Returns 1 for counterclockwise, 0 for clockwise."""
-        return int(self.to_bool())
-
-    def __int__(self) -> int:
-        return self.to_int()
-
-    def __bool__(self) -> bool:
-        raise TypeError("Use .to_bool() for explicit conversion.")
 
 
 class Rotator(ABC):
@@ -553,9 +534,10 @@ class StepperMotor(typing.Generic[TRotator], ABC):
         self.microstep_config: MicrostepConfig | None = None
 
         # Placeholder for GPIO objects
-        self.dir = self.pin_config.dir
-        self.step = self.pin_config.step
-        self._enable = self.pin_config.enable
+        if self.pin_config:
+            self.dir = self.pin_config.dir
+            self.step = self.pin_config.step
+            self._enable = self.pin_config.enable
 
         self.rotator: TRotator | None = None
 
