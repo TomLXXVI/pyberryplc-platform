@@ -40,15 +40,17 @@ class MotionProfile(ABC):
     """
     Base class for defining a single-axis motion profile.
 
-    After instantiation of this class, the following attributes of the motion
+    After instantiation of this class, following attributes of the motion
     profile are available:
 
     Attributes
     ----------
     `v_m`:
-        Top velocity.
+        Maximum velocity of the motor.
+    `v_top`:
+        Top velocity of the motion profile.
     `a_m`:
-        Maximum acceleration.
+        Maximum acceleration of the motor.
     `ds_tot`:
         Total travel distance.
     `dt_tot`:
@@ -74,7 +76,7 @@ class MotionProfile(ABC):
 
     Notes
     -----
-    The choice of units of measurement is free, but they must be consistent.
+    The choice of units of measurement is free, but must be consistent.
     For example, if time is measured in seconds and motor shaft position (being
     an angle) is measured in degrees, then velocity must be in degrees per
     second, and acceleration must be in degrees per square seconds.
@@ -83,7 +85,7 @@ class MotionProfile(ABC):
         self,
         ds_tot: float,
         v_m: float,
-        a_m: float | None = None,
+        a_m: float,
         dt_tot: float | None = None,
         v_ini: float = 0.0,
         v_fin: float | None = 0.0,
@@ -96,39 +98,45 @@ class MotionProfile(ABC):
         ds_tot : float
             Total travel distance.
         v_m : float
-            Top velocity of single-axis motion.
-        a_m : float, optional
-            Maximum (allowable) acceleration during the motion.
+            Maximum (allowable) velocity of the motor.
+        a_m : float
+            Maximum (allowable) acceleration of the motor.
         dt_tot : float, optional
             Total travel time.
         v_ini : float, optional
             Initial velocity or start velocity. Default is 0.0.
         v_fin : float, optional
             Final velocity, i.e. at the end of the travel distance. Default is
-            0.0.
+            0.0. If `None` the final velocity will be set equal to the top
+            velocity of the motion profile.
         s_ini : float, optional
             Initial position or start position. Default is 0.0.
 
         A motion profile can be instantiated in two different ways:
-        1.  The travel distance `ds_tot`, the top velocity `v_m`, the
-            acceleration `a_m`, and the initial velocity `v_ini` and final
-            velocity `v_fin` are given.
-        2.  The travel distance `ds_tot`, the top velocity `v_m`, the total
-            travel time `dt_tot`, and the initial velocity `v_ini` and final
-            velocity `v_fin` are given.
 
-        In multi-axis motion, the motion profile of the axis with the largest
-        displacement can be calculated the first way. The motion profiles of the
-        other axes are then calculated the second way using the same travel
-        time `dt_tot` as the axis with the largest displacement.
+        1.  The travel distance `ds_tot` of the movement, the acceleration `a_m`
+            of the motor, and the initial velocity `v_ini` and final velocity
+            `v_fin` of the movement are known.
+            The top velocity `v_top` will then be taken as the maximum
+            velocity `v_m` of the motor. The total travel time `dt_tot` is then
+            still to be determined.
+
+        2.  The total travel distance `ds_tot` and total travel time `dt_tot` of
+            the movement, the acceleration `a_m` of the motor, and the initial
+            velocity `v_ini` and final velocity `v_fin` of the movement are
+            known. The top velocity `v_top` of the movement still needs to be
+            determined, but cannot exceed the maximum velocity `v_m` of the
+            motor.
         """
         self.ds_tot = ds_tot
         self.a_m = a_m
         self.v_m = v_m
+        self.v_top = v_m
         self.dt_tot = dt_tot
         self.v_ini = v_ini
         self.v_fin = v_fin
         self.s_ini = s_ini
+
         self._solve_motion_profile()
 
     def _solve_motion_profile(self) -> None:
@@ -138,16 +146,16 @@ class MotionProfile(ABC):
             self._solve_with_method2()
 
     def _solve_with_method1(self):
-        """Solves for the attributes of the motion profile when the travel
-        distance `ds_tot`, the top velocity `v_m`, the acceleration `a_m`, and
-        the initial velocity `v_ini` and final velocity `v_fin` are given.
+        """Solves for the attributes of the motion profile when travel distance
+        `ds_tot`, top velocity `v_top` = `v_m`, maximum acceleration `a_m`, and
+        initial and final velocity `v_ini` and `v_fin` are given.
         """
-        self.dv_ini = self.v_m - self.v_ini
+        self.dv_ini = self.v_top - self.v_ini
         if self.v_fin is not None:
-            self.dv_fin = self.v_fin - self.v_m
+            self.dv_fin = self.v_fin - self.v_top
         else:
             self.dv_fin = 0.0
-            self.v_fin = self.v_m
+            self.v_fin = self.v_top
         self.dt_ini = self._calc_ini_accel_duration()
         self.dt_fin = self._calc_fin_accel_duration()
         self.ds_ini = self._calc_ini_accel_distance()
@@ -156,42 +164,32 @@ class MotionProfile(ABC):
         self.dt_cov = self._calc_cst_veloc_duration()
         self.dt_tot = self.dt_ini + self.dt_cov + self.dt_fin
 
-    def _solve_with_method2(self, v_m: float | None = None) -> None:
-        """Solves for the attributes of the motion profile when the travel
-        distance `ds_tot`, the top velocity `v_m`, the total travel time
-        `dt_tot`, and the initial velocity `v_ini` and final velocity `v_fin`
-        are given.
+    def _solve_with_method2(self) -> None:
+        """Solves for the attributes of the motion profile when travel distance
+        `ds_tot`, travel time `dt_tot`, acceleration `a_m`, and initial and
+        final velocity `v_ini` and `v_fin` are given.
         """
-        if v_m is not None: self.v_m = v_m
-        self.dv_ini = self.v_m - self.v_ini
-        self.dv_fin = self.v_fin - self.v_m if self.v_fin is not None else 0.0
-
-        # Find acceleration time for which the calculated total travel distance
-        # equals the given total travel distance.
-        def f(dt_ini: float) -> float:
-            self.dt_ini = dt_ini
-            self.a_m = self._calc_ini_accel()
+        def fn(v):
+            self.v_top = v
+            self.dv_ini = self.v_top - self.v_ini
+            if self.v_fin is not None:
+                self.dv_fin = self.v_fin - self.v_top
+            else:
+                self.dv_fin = 0.0
+            self.dt_ini = self._calc_ini_accel_duration()
             self.dt_fin = self._calc_fin_accel_duration()
-            self.dt_cov = self.dt_tot - (self.dt_ini + self.dt_fin)
             self.ds_ini = self._calc_ini_accel_distance()
             self.ds_fin = self._calc_fin_accel_distance()
-            self.ds_cov = self.v_m * self.dt_cov
-            ds_tot = self.ds_ini + self.ds_cov + self.ds_fin
-            dev = ds_tot - self.ds_tot
+            self.ds_cov = self.ds_tot - (self.ds_ini + self.ds_fin)
+            self.dt_cov = self.dt_tot - (self.dt_ini + self.dt_fin)
+            v_new = self.ds_cov / self.dt_cov
+            dev = v_new - v
             return dev
 
-        try:
-            sol = scipy.optimize.root_scalar(
-                f,
-                bracket=[0.05 * self.dt_tot, 0.5 * self.dt_tot]
-            )
-        except ValueError:
-            # If no solution can be found at the current speed, try with a
-            # lower speed.
-            self._solve_with_method2(v_m=0.95 * self.v_m)
-        else:
-            f(sol.root)
-            self.v_fin = self.v_m
+        sol = scipy.optimize.root_scalar(fn, bracket=[0.0, self.v_m])
+        self.v_top = sol.root
+        self.v_fin = self.v_top if self.v_fin is None else self.v_fin
+        fn(self.v_top)
 
     @abstractmethod
     def _ini_accel_fun(self, t: float, abs_time: bool) -> float:
@@ -229,7 +227,7 @@ class MotionProfile(ABC):
     def _calc_fin_accel_distance(self) -> float:
         t0 = 0.0
         t1 = t0 + self.dt_fin
-        v0 = self.v_m
+        v0 = self.v_top
         s0 = 0.0
         if t1 > t0:
             _, s, _ = position(t1, self._fin_accel_fun, t0, v0, s0, abs_time=False)
@@ -240,7 +238,7 @@ class MotionProfile(ABC):
             return 0.0
     
     def _calc_cst_veloc_duration(self) -> float:
-        dt_cov = self.ds_cov / self.v_m
+        dt_cov = self.ds_cov / self.v_top
         return dt_cov
 
     def velocity_profile(self) -> tuple[np.ndarray, np.ndarray]:
@@ -408,8 +406,7 @@ class MotionProfile(ABC):
         """
         t_ax, v_ax = self.velocity_profile()
 
-        if N is not None:
-            v_ax = N * v_ax
+        if N is not None: v_ax *= N
 
         interp = scipy.interpolate.interp1d(t_ax, v_ax)
 
@@ -436,8 +433,7 @@ class MotionProfile(ABC):
         """
         t_ax, s_ax = self.position_profile()
 
-        if N is not None:
-            s_ax = N * s_ax
+        if N is not None: s_ax *= N
 
         interp = scipy.interpolate.interp1d(t_ax, s_ax)
 
@@ -466,8 +462,7 @@ class MotionProfile(ABC):
         """
         t_ax, s_ax = self.position_profile()
 
-        if N is not None:
-            s_ax = N * s_ax
+        if N is not None: s_ax *= N
 
         interp = scipy.interpolate.interp1d(s_ax, t_ax)
 
@@ -692,14 +687,30 @@ class TrapezoidalProfile(MotionProfile):
     """
 
     def _ini_accel_fun(self, t: float, abs_time: bool = False) -> float:
-        if self.dv_ini != 0.0:
-            return self.a_m
+        t0 = 0.0
+        t1 = t0 + self.dt_ini
+
+        if t0 <= t <= t1:
+            if self.dv_ini > 0.0:
+                return self.a_m
+            elif self.dv_ini < 0.0:
+                return -self.a_m
+            else:
+                return 0.0
         else:
             return 0.0
 
     def _fin_accel_fun(self, t: float, abs_time: bool = False) -> float:
-        if self.dv_fin != 0:
-            return -self.a_m
+        t0 = self.dt_ini + self.dt_cov if abs_time else 0.0
+        t1 = t0 + self.dt_fin
+
+        if t0 <= t <= t1:
+            if self.dv_fin > 0.0:
+                return self.a_m
+            elif self.dv_fin < 0.0:
+                return -self.a_m
+            else:
+                return 0.0
         else:
             return 0.0
 
@@ -727,9 +738,11 @@ class SCurvedProfile(MotionProfile):
                 c1 *= -1
         else:
             c1 = 0.0
+
         t0 = 0.0
         t1 = t0 + self.dt_ini / 2
         t2 = t1 + self.dt_ini / 2
+
         if t0 <= t <= t1:
             return c1 * t
         elif t1 < t <= t2:
@@ -740,16 +753,14 @@ class SCurvedProfile(MotionProfile):
     def _fin_accel_fun(self, t: float, abs_time: bool = False) -> float:
         if self.dv_fin != 0.0:
             c1 = self.a_m ** 2 / abs(self.dv_fin)
-            if self.dv_fin > 0: 
-                c1 *= -1
+            if self.dv_fin > 0: c1 *= -1
         else:
             c1 = 0.0
-        if abs_time:
-            t0 = self.dt_ini + self.dt_cov
-        else:
-            t0 = 0.0
+
+        t0 = self.dt_ini + self.dt_cov if abs_time else 0.0
         t1 = t0 + self.dt_fin / 2
         t2 = t1 + self.dt_fin / 2
+
         if t0 <= t <= t1:
             return -c1 * (t - t0)
         elif t1 < t <= t2:
@@ -767,231 +778,4 @@ class SCurvedProfile(MotionProfile):
 
     def _calc_ini_accel(self) -> float:
         return 2 * self.dv_ini / self.dt_ini
-
-
-class ProfileType(StrEnum):
-    TRAPEZOIDAL = "trapezoidal"
-    S_CURVED = "S-curved"
-
-    @classmethod
-    def get_types(cls) -> list[str]:
-        return [cls.TRAPEZOIDAL, cls.S_CURVED]
-
-
-Point = tuple[float, float]
-
-
-class XYMotionControl:
-    """
-    Calculates the motion profiles along the X-axis and along the Y-axis to
-    move in a straight line from one point to another point (synchronised X- and
-    Y-axis motion).
-    """
-    def __init__(
-        self,
-        pitch: float,
-        motor_speed: float,
-        motor_accel: float,
-        profile_type: ProfileType = ProfileType.TRAPEZOIDAL
-    ) -> None:
-        """Initializes the `XYMotionControl` object.
-
-        Parameters
-        ----------
-        pitch: float
-            Pitch of the lead screw (i.e. number of revolutions of the screw to
-            move the nut one meter).
-        motor_speed:
-            Available angular speed of the motor (deg/s).
-        motor_accel:
-            Available angular acceleration of the motor (deg/s²). This will
-            depend on the torque capabilities of the motor and on the total 
-            inertia moment of the motor and the connected load.
-        profile_type : ProfileType
-            The type of motion profile. Either a trapezoidal (default) or 
-            S-curved motion profile.
-        """
-        if profile_type in ProfileType.get_types():
-            self.profile_type = profile_type
-        else:
-            raise TypeError(f"Profile type '{profile_type}' does not exist.")
-        self.pitch = pitch
-        self.motor_speed = motor_speed
-        self.motor_accel = motor_accel
-
-        self._N = 360.0 * self.pitch  # convert revs/m -> deg/m
-        self._pt_start: Point = (0.0, 0.0)
-        self._pt_end: Point = (0.0, 0.0)
-        self._angle_ini_x: float = 0.0
-        self._angle_ini_y: float = 0.0
-        self._speed_ini_x: float = 0.0
-        self._speed_ini_y: float = 0.0
-        self._speed_fin_x: float | None = None
-        self._speed_fin_y: float | None = None
-        self._direction_x: Direction = Direction.COUNTERCLOCKWISE
-        self._direction_y: Direction = Direction.COUNTERCLOCKWISE
-        self._dx: float = 0.0
-        self._dy: float = 0.0
-        self._dtheta_x: float = 0.0
-        self._dtheta_y: float = 0.0
-        self._mp_x: MotionProfile | None = None
-        self._mp_y: MotionProfile | None = None
-
-    def set_points(self, pt_start: Point, pt_end: Point) -> None:
-        """Sets the start and end point of the linear motion."""
-        self._pt_start = pt_start
-        self._pt_end = pt_end
-        
-        self._angle_ini_x = self._N * pt_start[0]
-        self._angle_ini_y = self._N * pt_start[1]
-        
-        self._dx = self._pt_end[0] - self._pt_start[0]
-        self._dy = self._pt_end[1] - self._pt_start[1]
-        self._dtheta_x = self._N * self._dx
-        self._dtheta_y = self._N * self._dy
-        
-        self._direction_x = Direction.COUNTERCLOCKWISE
-        self._direction_y = Direction.COUNTERCLOCKWISE
-        if self._dx < 0.0:
-            self._direction_x = Direction.CLOCKWISE
-        if self._dy < 0.0:
-            self._direction_y = Direction.CLOCKWISE
-        
-        # Erase existing motion profiles
-        self._mp_x, self._mp_y = None, None
- 
-    def set_boundary_velocities(
-        self,
-        speed_ini_x: float = 0.0,
-        speed_ini_y: float = 0.0,
-        speed_fin_x: float | None = None,
-        speed_fin_y: float | None = None
-    ) -> None:
-        """Sets the initial and final velocities of the linear motion in x and y.
-
-        The final velocity can be `None`, meaning that it is unknown. In that
-        case the final velocity will be equal to the top velocity of the 
-        motion.
-        """
-        self._speed_ini_x = speed_ini_x
-        self._speed_ini_y = speed_ini_y
-        self._speed_fin_x = speed_fin_x
-        self._speed_fin_y = speed_fin_y
-
-        # Erase existing motion profiles
-        self._mp_x, self._mp_y = None, None
    
-    def _create_motion_profile(self, **kwargs) -> MotionProfile:
-        # noinspection PyUnreachableCode
-        match self.profile_type:
-            case ProfileType.TRAPEZOIDAL:
-                MP = TrapezoidalProfile
-            case ProfileType.S_CURVED:
-                MP = SCurvedProfile
-            case _:
-                MP = TrapezoidalProfile
-        return MP(**kwargs)
-    
-    def _calc_motion_profiles(self) -> None:
-        """Calculates the synchronised profiles of X- and Y-axis motion.
-
-        The X- and Y-axis motion will have the same start and ending time,
-        independent of their displacement.
-        """
-        # Motion starts from rest: the axis with the largest move determines
-        # the total travel time of both axis moves.
-        if self._speed_ini_x == 0.0 and self._speed_ini_y == 0.0:
-            dev = round(self._dtheta_x - self._dtheta_y, 6)
-            if dev >= 0:
-                mp_x = self._create_motion_profile(
-                    ds_tot=self._dtheta_x,
-                    v_m=self.motor_speed,
-                    a_m=self.motor_accel,
-                    v_ini=self._speed_ini_x,
-                    v_fin=self._speed_fin_x,
-                    s_ini=self._angle_ini_x
-                )
-                mp_y = self._create_motion_profile(
-                    ds_tot=self._dtheta_y,
-                    v_m=self.motor_speed,
-                    a_m=self.motor_accel,
-                    dt_tot=mp_x.dt_tot,
-                    v_ini=self._speed_ini_y,
-                    v_fin=self._speed_fin_y,
-                    s_ini=self._angle_ini_y
-                )
-            else:
-                mp_y = self._create_motion_profile(
-                    ds_tot=self._dtheta_y,
-                    v_m=self.motor_speed,
-                    a_m=self.motor_accel,
-                    v_ini=self._speed_ini_y,
-                    v_fin=self._speed_fin_y,
-                    s_ini=self._angle_ini_y
-                )
-                mp_x = self._create_motion_profile(
-                    ds_tot=self._dtheta_x,
-                    v_m=self.motor_speed,
-                    a_m=self.motor_accel,
-                    dt_tot=mp_y.dt_tot,
-                    v_ini=self._speed_ini_x,
-                    v_fin=self._speed_fin_x,
-                    s_ini=self._angle_ini_x
-                )
-        # Both axes are moving at the start of an intermediate segment with
-        # known initial velocity.
-        else:
-            dt_tot_x = self._dtheta_x / self._speed_ini_x
-            dt_tot_y = self._dtheta_y / self._speed_ini_y
-            dev = round(dt_tot_x - dt_tot_y, 6)
-            if dev >= 0.0:
-                mp_x = self._create_motion_profile(
-                    ds_tot=self._dtheta_x,
-                    v_m=self._speed_ini_x,
-                    a_m=self.motor_accel,
-                    v_ini=self._speed_ini_x,
-                    v_fin=self._speed_fin_x,
-                    s_ini=self._angle_ini_x
-                )
-                mp_y = self._create_motion_profile(
-                    ds_tot=self._dtheta_y,
-                    v_m=self._speed_ini_x,
-                    a_m=self.motor_accel,
-                    dt_tot=mp_x.dt_tot,
-                    v_ini=self._speed_ini_y,
-                    v_fin=self._speed_fin_y,
-                    s_ini=self._angle_ini_y
-                )
-            else:
-                mp_y = self._create_motion_profile(
-                    ds_tot=self._dtheta_y,
-                    v_m=self._speed_ini_y,
-                    a_m=self.motor_accel,
-                    v_ini=self._speed_ini_y,
-                    v_fin=self._speed_fin_y,
-                    s_ini=self._angle_ini_y
-                )
-                mp_x = self._create_motion_profile(
-                    ds_tot=self._dtheta_x,
-                    v_m=self._speed_ini_y,
-                    a_m=self.motor_accel,
-                    dt_tot=mp_y.dt_tot,
-                    v_ini=self._speed_ini_x,
-                    v_fin=self._speed_fin_x,
-                    s_ini=self._angle_ini_x
-                )
-        self._mp_x = mp_x
-        self._mp_y = mp_y
-    
-    @property
-    def x_motion(self) -> tuple[MotionProfile, Direction]:
-        """Returns the motion profile and rotation direction for the X-axis."""
-        if self._mp_x is None: self._calc_motion_profiles()
-        return self._mp_x, self._direction_x
-    
-    @property
-    def y_motion(self) -> tuple[MotionProfile, Direction]:
-        """Returns the motion profile and rotation direction for the Y-axis."""
-        if self._mp_y is None: self._calc_motion_profiles()
-        return self._mp_y, self._direction_y
-    

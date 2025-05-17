@@ -30,7 +30,7 @@ def velocity(
     sol = solve_ivp(
         fun, (t0, t), [v0], 
         method='LSODA', 
-        t_eval=np.linspace(t0, t, endpoint=True), 
+        t_eval=np.linspace(t0, t, 100, endpoint=True), 
         args=(abs_time,)
     )
     # noinspection PyUnresolvedReferences
