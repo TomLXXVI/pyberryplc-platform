@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 from .multi_axis import (
     Direction, 
     MotionProfile, 
