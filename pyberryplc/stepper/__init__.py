@@ -16,6 +16,6 @@ __all__ = [
     "RotatorType",
     "A4988StepperMotor",
     "TMC2208StepperMotor",
-    "StepperMotorProcess",
+    "SingleMotionProcess",
     "TMC2208UART",
 ]

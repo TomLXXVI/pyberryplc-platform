@@ -5,8 +5,8 @@ from pyberryplc.core import AbstractPLC, SharedData
 from pyberryplc.stepper import (
     TMC2208StepperMotor,
     PinConfig,
-    TMC2208UART, 
-    StepperMotorProcess
+    TMC2208UART,
+    SingleMotionProcess
 )
 
 
@@ -39,7 +39,7 @@ class XYMotionPLC(AbstractPLC):
         port_x: str = "/dev/ttyUSB1"
         port_y: str = "/dev/ttyUSB0"
 
-        self._proc_x = StepperMotorProcess(
+        self._proc_x = SingleMotionProcess(
             conn=px_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={
@@ -52,7 +52,7 @@ class XYMotionPLC(AbstractPLC):
             name="X-axis"
         )
         
-        self._proc_y = StepperMotorProcess(
+        self._proc_y = SingleMotionProcess(
             conn=py_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={

@@ -1,4 +1,5 @@
 import numpy as np
+from .multi_axis import MotionProfile
 
 
 def get_pitch(revs: int, distance: float) -> float:
@@ -20,29 +21,26 @@ def get_pitch(revs: int, distance: float) -> float:
     return pitch
 
 
-def connect(mp1, mp2):
-    """Connects the motion profile `mp1` of the preceding segment with the
-    motion profile `mp2` of the next segment.
+def connect(*mps: MotionProfile):
+    """Connects the motion profiles of segments in a trajectory.
 
     Returns
     -------
     pos_profile : tuple[float, float]
-        Resulting position profile along the two segments. First element of the
+        Resulting position profile along the segments. First element of the
         tuple is the time array, the second element is the corresponding 
         position array.
     vel_profile : tuple[float, float]
-        Resulting velocity profile along the two segments. First element of the
+        Resulting velocity profile along the segments. First element of the
         tuple is the time array, the second element is the corresponding 
         velocity array.
     acc_profile : tuple[float, float]
-        Resulting acceleration profile along the two segments. First element of 
+        Resulting acceleration profile along the segments. First element of 
         the tuple is the time array, the second element is the corresponding 
         acceleration array.
     """
-    def _connect_vel(mp1, mp2):
-        """Connects the velocity profile of motion profile `mp1` of the preceding 
-        segment with the velocity profile of motion profile `mp2` of the next 
-        segment.
+    def _connect_vel(*mps: MotionProfile):
+        """Connects the velocity profiles.
     
         Returns
         -------
@@ -51,15 +49,11 @@ def connect(mp1, mp2):
         v_arr:
             Corresponding velocity array.
         """
-        profile1 = mp1.velocity_profile()
-        profile2 = mp2.velocity_profile()
-        t_arr, v_arr = _connect(profile1, profile2)
+        t_arr, v_arr = _connect(*[mp.velocity_profile() for mp in mps])
         return t_arr, v_arr
     
-    def _connect_pos(mp1, mp2):
-        """Connects the position profile of motion profile `mp1` of the preceding 
-        segment with the position profile of motion profile `mp2` of the next 
-        segment.
+    def _connect_pos(*mps: MotionProfile):
+        """Connects the position profiles.
     
         Returns
         -------
@@ -68,15 +62,11 @@ def connect(mp1, mp2):
         s_arr:
             Corresponding position array.
         """
-        profile1 = mp1.position_profile()
-        profile2 = mp2.position_profile()
-        t_arr, s_arr = _connect(profile1, profile2)
+        t_arr, s_arr = _connect(*[mp.position_profile() for mp in mps])
         return t_arr, s_arr
     
-    def _connect_acc(mp1, mp2):
-        """Connects the acceleration profile of motion profile `mp1` of the preceding 
-        segment with the acceleration profile of motion profile `mp2` of the next 
-        segment.
+    def _connect_acc(*mps: MotionProfile):
+        """Connects the acceleration profiles.
     
         Returns
         -------
@@ -85,14 +75,12 @@ def connect(mp1, mp2):
         a_arr:
             Corresponding acceleration array.
         """
-        profile1 = mp1.acceleration_profile()
-        profile2 = mp2.acceleration_profile()
-        t_arr, a_arr = _connect(profile1, profile2)
+        t_arr, a_arr = _connect(*[mp.acceleration_profile() for mp in mps])
         return t_arr, a_arr
     
-    def _connect(profile1, profile2):
-        """Connects the profile (position, velocity, or acceleration) of the 
-        preceding profile 1 with the next profile 2.
+    def _connect(*profiles):
+        """Connects the profiles (position, velocity, or acceleration) of the 
+        segments in the trajectory.
     
         Returns
         -------
@@ -101,15 +89,21 @@ def connect(mp1, mp2):
         arr:
             Array with the corresponding profile values.
         """
-        t_arr1, arr1 = profile1
-        t_arr2, arr2 = profile2
-        dt_shift = t_arr1[-1]
-        t_arr2 += dt_shift
-        t_arr = np.concatenate((t_arr1, t_arr2))
-        arr = np.concatenate((arr1, arr2))
-        return t_arr, arr
-
-    pos_profile = _connect_pos(mp1, mp2)
-    vel_profile = _connect_vel(mp1, mp2)
-    acc_profile = _connect_acc(mp1, mp2)
+        t_arr_lst, arr_lst = [], []
+        for i, profile in enumerate(profiles):
+            t_arr, arr = profile
+            if i > 0:
+                dt_shift = t_arr_lst[-1][-1]
+                t_arr += dt_shift
+            t_arr_lst.append(t_arr)
+            arr_lst.append(arr)
+        t_arr_concat = np.concatenate(tuple(t_arr_lst))
+        arr_concat = np.concatenate(tuple(arr_lst))
+        return t_arr_concat, arr_concat
+    
+    mps = tuple(mp for mp in mps if isinstance(mp, MotionProfile))
+    pos_profile = _connect_pos(*mps)
+    vel_profile = _connect_vel(*mps)
+    acc_profile = _connect_acc(*mps)
+    
     return pos_profile, vel_profile, acc_profile

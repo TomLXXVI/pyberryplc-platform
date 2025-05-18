@@ -136,8 +136,11 @@ class MotionProfile(ABC):
         self.v_ini = v_ini
         self.v_fin = v_fin
         self.s_ini = s_ini
-
-        self._solve_motion_profile()
+        
+        if self.ds_tot > 0.0:
+            self._solve_motion_profile()
+        else:
+            self._set_no_movement()
 
     def _solve_motion_profile(self) -> None:
         if self.dt_tot is None:
@@ -163,11 +166,13 @@ class MotionProfile(ABC):
         self.ds_cov = self.ds_tot - (self.ds_ini + self.ds_fin)
         self.dt_cov = self._calc_cst_veloc_duration()
         self.dt_tot = self.dt_ini + self.dt_cov + self.dt_fin
-
+    
     def _solve_with_method2(self) -> None:
         """Solves for the attributes of the motion profile when travel distance
         `ds_tot`, travel time `dt_tot`, acceleration `a_m`, and initial and
-        final velocity `v_ini` and `v_fin` are given.
+        final velocity `v_ini` and `v_fin` are given. Looks for the top velocity
+        `v_top` for which the total travel distance `ds_tot` is finished within 
+        the specified total travel time `dt_tot`.
         """
         def fn(v):
             self.v_top = v
@@ -186,11 +191,30 @@ class MotionProfile(ABC):
             dev = v_new - v
             return dev
 
+        # Find top velocity (between 0 and maximum motor speed) so that the
+        # displacement `ds_tot` will be finished after `dt_tot` time.
+        # If no solution is found within the bracket, `root_scalar()` raises a
+        # `ValueError`.
         sol = scipy.optimize.root_scalar(fn, bracket=[0.0, self.v_m])
         self.v_top = sol.root
         self.v_fin = self.v_top if self.v_fin is None else self.v_fin
         fn(self.v_top)
-
+    
+    def _set_no_movement(self):
+        self.v_ini = 0.0
+        self.dv_ini = 0.0
+        self.v_top = 0.0
+        self.v_fin = 0.0
+        self.dv_fin = 0.0
+        self.ds_ini = 0.0
+        self.ds_cov = 0.0
+        self.ds_fin = 0.0
+        self.ds_tot = 0.0
+        self.dt_ini = 0.0
+        self.dt_cov = self.dt_tot
+        self.dt_fin = 0.0
+        self.a_m = 0.0
+    
     @abstractmethod
     def _ini_accel_fun(self, t: float, abs_time: bool) -> float:
         ...
@@ -778,4 +802,12 @@ class SCurvedProfile(MotionProfile):
 
     def _calc_ini_accel(self) -> float:
         return 2 * self.dv_ini / self.dt_ini
-   
+
+
+class ProfileType(StrEnum):
+    TRAPEZOIDAL = "trapezoidal"
+    S_CURVED = "S-curved"
+
+    @classmethod
+    def get_types(cls) -> list[str]:
+        return [cls.TRAPEZOIDAL, cls.S_CURVED]
