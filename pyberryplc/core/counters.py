@@ -2,14 +2,15 @@
 
 class CounterUp:
     
-    def __init__(self) -> None:
-        self.value: int = 0
+    def __init__(self, preset_val: int = 0) -> None:
+        self.preset_value = preset_val
+        self.value = preset_val
     
     def count_up(self) -> None:
         self.value += 1
     
     def reset(self) -> None:
-        self.value = 0
+        self.value = self.preset_value
 
 
 class CounterDown:

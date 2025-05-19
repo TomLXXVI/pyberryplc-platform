@@ -386,7 +386,15 @@ class Segment:
             # noinspection PyProtectedMember
             return self._y_rotator._delays
         return None
+    
+    @property
+    def x_direction(self) -> Direction:
+        return self._dir_x
 
+    @property
+    def y_direction(self) -> Direction:
+        return self._dir_y
+    
     @property
     def final_speed_x(self) -> float | None:
         """Returns the x-component of the final speed at the end point of the

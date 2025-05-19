@@ -6,7 +6,7 @@ from pyberryplc.stepper import (
     TMC2208StepperMotor,
     PinConfig,
     TMC2208UART,
-    SingleMotionProcess
+    MotionProfileProcess
 )
 
 
@@ -39,11 +39,11 @@ class XYMotionPLC(AbstractPLC):
         port_x: str = "/dev/ttyUSB1"
         port_y: str = "/dev/ttyUSB0"
 
-        self._proc_x = SingleMotionProcess(
+        self._proc_x = MotionProfileProcess(
             conn=px_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={
-                "pin_config": PinConfig(step_pin_number=21, dir_pin_number=27, use_pigpio=True),
+                "pin_config": PinConfig(step_pin_ID=21, dir_pin_ID=27, use_pigpio=True),
                 "logger": self.logger,
                 "name": "motor X",
                 "uart": TMC2208UART(port=port_x),
@@ -52,11 +52,11 @@ class XYMotionPLC(AbstractPLC):
             name="X-axis"
         )
         
-        self._proc_y = SingleMotionProcess(
+        self._proc_y = MotionProfileProcess(
             conn=py_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={
-                "pin_config": PinConfig(step_pin_number=19, dir_pin_number=20, use_pigpio=True),
+                "pin_config": PinConfig(step_pin_ID=19, dir_pin_ID=20, use_pigpio=True),
                 "logger": self.logger,
                 "name": "motor Y",
                 "uart": TMC2208UART(port=port_y),

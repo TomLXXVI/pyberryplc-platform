@@ -17,7 +17,8 @@ class TwoStageProfileRotator(ProfileRotator):
     functions.
     """
     def preprocess(self, direction: Direction, profile: MotionProfile) -> None:
-        """Calculates the delays between successive step pulses that drive the 
+        """
+        Calculates the delays between successive step pulses that drive the 
         stepper motor from the given motion profile..
         """
         self.direction = direction
@@ -25,25 +26,29 @@ class TwoStageProfileRotator(ProfileRotator):
         self._generate_delays()
 
     def rotate(self) -> None:
-        """Commands the rotation of the stepper motor."""
+        """
+        Commands the rotation of the stepper motor.
+        """
         self._step_loop()
     
     @property
     def delays(self) -> list[float]:
-        """Returns the delays between successive step pulses after internal
+        """
+        Returns the delays between successive step pulses after internal
         preprocessing of the motion profile.
         """
         return self._delays
     
     @delays.setter
     def delays(self, value: list[float]) -> None:
-        """Sets the delays between successive step pulses after external 
+        """
+        Sets the delays between successive step pulses after external 
         preprocessing of the motion profile.
         """
         self._delays = value
 
 
-class SingleMotionProcess(multiprocessing.Process):
+class MotionProfileProcess(multiprocessing.Process):
     """
     Motor control process that receives a motion profile from a master process, 
     processes the motion profile and executes it using a `StepperMotor` 
@@ -156,11 +161,11 @@ class SingleMotionProcess(multiprocessing.Process):
                 })
 
 
-class MultiMotionProcess(multiprocessing.Process):
+class TrajectoryProcess(multiprocessing.Process):
     """
     Motor control process that directly receives a step pulse train to drive 
-    the stepper motor. The preprocessing of the motion profile must have been 
-    done in advance.
+    the stepper motor. Processing of the motion profile must have been done in 
+    advance.
 
     Parameters
     ----------
@@ -228,13 +233,13 @@ class MultiMotionProcess(multiprocessing.Process):
 
             cmd = msg.get("cmd")
 
-            if cmd == "start":
+            if cmd == "start_segment":
                 motor.rotator.delays = msg.get("delays", None)
                 motor.rotator.direction = msg.get("direction", Direction.COUNTERCLOCKWISE)
                 if motor.rotator.delays is not None:
                     motor.rotator.rotate()
                     self.conn.send({
-                        "status": "done", 
+                        "status": "segment_done", 
                         "name": self.name, 
                         "travel_time": motor.rotator.moving_time
                     })

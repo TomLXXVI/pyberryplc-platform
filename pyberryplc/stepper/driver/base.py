@@ -235,23 +235,22 @@ class ProfileRotator(Rotator):
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
-        angles = [i * step_angle for i in range(num_steps + 1)]
+        angles = [self._motion_profile.s_ini + i * step_angle for i in range(num_steps + 1)]
         times = list(map(self._motion_profile.get_time_position_fn(), angles))
-        self._delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
-
+        delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
+        self._delays = delays
+        
     def _step_loop(self) -> None:
         self._busy = True
         self._write_direction()
         self._start_time = time.perf_counter()
-        
         t_ref = self._start_time
         for delay in self._delays:
             t_ref += delay
-            self._pulse_step_pin()
-            
+            if delay > 0.0:
+                self._pulse_step_pin()
             while time.perf_counter() < t_ref:
                 pass
-            
         self._end_time = time.perf_counter()
         self._busy = False
     
@@ -382,39 +381,39 @@ class PinConfig:
 
     Attributes
     ----------
-    step_pin_number : int
+    step_pin_ID : int
         GPIO pin number for STEP signal.
-    dir_pin_number : int
+    dir_pin_ID : int
         GPIO pin number for DIR signal.
-    en_pin_number : int | None, optional
+    en_pin_ID : int | None, optional
         GPIO pin number for ENABLE signal (active-low). Default is None.
     """
-    step_pin_number: int
-    dir_pin_number: int
-    en_pin_number: int | None = None
+    step_pin_ID: int
+    dir_pin_ID: int
+    en_pin_ID: int | None = None
     use_pigpio: bool = False
     
     @property
     def step(self) -> DigitalOutput | DigitalOutputPigpio:
         if self.use_pigpio:
-            return DigitalOutputPigpio(self.step_pin_number, "STEP")
+            return DigitalOutputPigpio(self.step_pin_ID, "STEP")
         else:
-            return DigitalOutput(self.step_pin_number, "STEP")
+            return DigitalOutput(self.step_pin_ID, "STEP")
     
     @property
     def dir(self) -> DigitalOutput | DigitalOutputPigpio:
         if self.use_pigpio:
-            return DigitalOutputPigpio(self.dir_pin_number, "DIR")
+            return DigitalOutputPigpio(self.dir_pin_ID, "DIR")
         else:
-            return DigitalOutput(self.dir_pin_number, "DIR")
+            return DigitalOutput(self.dir_pin_ID, "DIR")
         
     @property
     def enable(self) -> DigitalOutput | DigitalOutputPigpio | None:
-        if self.en_pin_number is not None:
+        if self.en_pin_ID is not None:
             if self.use_pigpio:
-                return DigitalOutputPigpio(self.en_pin_number, "EN", active_high=False)
+                return DigitalOutputPigpio(self.en_pin_ID, "EN", active_high=False)
             else:
-                return DigitalOutput(self.en_pin_number, "EN", active_high=False)
+                return DigitalOutput(self.en_pin_ID, "EN", active_high=False)
         return None
     
 
@@ -502,7 +501,9 @@ class MicrostepConfig:
         self.factor: int | None = None
 
     def set_resolution(self, resolution: str) -> None:
-        """Set and validate the desired microstep resolution."""
+        """
+        Set and validate the desired microstep resolution.
+        """
         if resolution not in self.supported:
             raise ValueError(f"Unsupported microstep resolution: {resolution}")
         self.resolution = resolution

@@ -12,7 +12,7 @@ from pyberryplc.stepper.driver.base import (
 )
 from pyberryplc.stepper.driver.a4988 import A4988StepperMotor
 from pyberryplc.stepper.driver.tmc2208 import TMC2208StepperMotor
-from pyberryplc.stepper.driver.process import SingleMotionProcess
+from pyberryplc.stepper.driver.process import MotionProfileProcess, TrajectoryProcess
 
 
 __all__ = [
@@ -24,5 +24,6 @@ __all__ = [
     "RotatorType",
     "A4988StepperMotor",
     "TMC2208StepperMotor",
-    "SingleMotionProcess"
+    "MotionProfileProcess",
+    "TrajectoryProcess"
 ]
