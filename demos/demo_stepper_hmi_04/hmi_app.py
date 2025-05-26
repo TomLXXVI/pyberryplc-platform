@@ -9,7 +9,7 @@ from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.multi_axis import ProfileType
+from pyberryplc.motion.motion_profile import ProfileType
 from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory
 from pyberryplc.motion.utils import get_pitch, connect
 
@@ -328,4 +328,4 @@ class MotionProfileDialog:
         )
         points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
         self.hmi.trajectory = trajectory_planner.create_trajectory(*points)
-        self.pos, self.vel, self.acc = connect(*self.hmi.trajectory)
+        self.pos, self.vel, self.acc = self.hmi.trajectory.motion_profiles

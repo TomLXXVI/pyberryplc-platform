@@ -1,14 +1,13 @@
+from typing import Any
 import numpy as np
 
-from .multi_axis import (
+from pyberryplc.stepper.driver.process import TwoStageProfileRotator
+from .motion_profile import (
     Direction, 
     MotionProfile, 
     TrapezoidalProfile, SCurvedProfile, 
     ProfileType
 )
-
-from pyberryplc.stepper.driver.process import TwoStageProfileRotator
-
 
 Point = tuple[float, float]
 
@@ -492,10 +491,23 @@ class Segment:
             acc_y = (ty_arr, ay_arr)
             return acc_x, acc_y
         return None
+
     
 class Trajectory(list[Segment]):
     """A `Trajectory` object is a list of `Segment` objects."""
-    pass
+    
+    @property
+    def motion_profiles(self) -> tuple[dict[str, Any], ...] | None:
+        """Returns the connected position profiles, velocity profiles, 
+        and acceleration profiles of the segments that constitute the 
+        trajectory.
+        """
+        if len(self) > 0:
+            from .utils import connect
+            # noinspection PyTupleAssignmentBalance
+            pos, vel, acc = connect(*self)
+            return pos, vel, acc
+        return None
 
 
 class TrajectoryPlanner:
@@ -554,7 +566,7 @@ class TrajectoryPlanner:
         Notes
         -----
         It is assumed that the lead screws of X- and Y-axis and the X- and 
-        Y-axis stepper motor are identical.
+        Y-axis stepper motor are both identical.
         """
         # Initialize class attributes of `Segment` class.
         xy_motion_control = XYMotionController(pitch, motor_speed, motor_accel, profile_type)

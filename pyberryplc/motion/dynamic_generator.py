@@ -1,4 +1,4 @@
-from .multi_axis import MotionProfile
+from .motion_profile import MotionProfile
 
 
 class DynamicDelayGenerator:

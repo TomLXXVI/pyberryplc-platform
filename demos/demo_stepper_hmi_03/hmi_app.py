@@ -3,7 +3,7 @@ import math
 from pyberryplc.hmi import AbstractHMI, ErrorDialog
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.multi_axis import MotionProfile, ProfileType
+from pyberryplc.motion.motion_profile import MotionProfile, ProfileType
 from pyberryplc.motion.trajectory import XYMotionController
 
 from plc_app import XYMotionPLC

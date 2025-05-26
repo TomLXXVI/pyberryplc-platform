@@ -8,13 +8,14 @@ import threading
 from collections import deque
 
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
-from pyberryplc.motion.multi_axis import MotionProfile, Direction
+from pyberryplc.motion.motion_profile import MotionProfile, Direction
 from pyberryplc.motion.dynamic_generator import DynamicDelayGenerator
 
 
 class Rotator(ABC):
     """
     Abstract base class for stepper motor motion strategies.
+    
     A Rotator defines how the motor is commanded to move, e.g. fixed speed,
     acceleration profile, or dynamically adjusted trajectory.
     """

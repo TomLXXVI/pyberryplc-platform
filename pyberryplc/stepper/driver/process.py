@@ -3,7 +3,7 @@ import multiprocessing
 # noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 
-from pyberryplc.motion.multi_axis import MotionProfile
+from pyberryplc.motion.motion_profile import MotionProfile
 from .base import StepperMotor, ProfileRotator, Direction
 
 

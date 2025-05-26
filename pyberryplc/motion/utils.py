@@ -1,7 +1,6 @@
 import numpy as np
-from .multi_axis import Direction
-from .trajectory import Segment
 
+from .trajectory import Segment
 
 def get_pitch(revs: int, distance: float) -> float:
     """Returns the pitch of a lead screw.
@@ -22,23 +21,31 @@ def get_pitch(revs: int, distance: float) -> float:
     return pitch
 
 
-def connect(*segments: Segment) -> tuple[dict, ...]:
+def connect(*segments: Segment) -> tuple:
     """Connects the segments in a trajectory.
 
     Returns
     -------
-    pos_profile : tuple[float, float]
-        Resulting position profile along the segments. First element of the
-        tuple is the time array, the second element is the corresponding 
-        position array.
-    vel_profile : tuple[float, float]
-        Resulting velocity profile along the segments. First element of the
-        tuple is the time array, the second element is the corresponding 
-        velocity array.
-    acc_profile : tuple[float, float]
-        Resulting acceleration profile along the segments. First element of 
-        the tuple is the time array, the second element is the corresponding 
-        acceleration array.
+    pos_profile : dict[str, float]
+        Resulting position profile along the segments.
+    vel_profile : dict[str, float]
+        Resulting velocity profile along the segments.
+    acc_profile : dict[str, float]
+        Resulting acceleration profile along the segments.
+    
+    Each profile-dictionary has the following structure:
+    ```
+    pos_profile = {
+        "x": {
+            "time": <array of time values>,
+            "values": <array of corresponding profile values>
+        },
+        "y": {
+            "time": <array of time values>,
+            "values": <array of corresponding profile values>
+        }
+    }
+    ```
     """
     def _connect_vel(*segments: Segment):
         """
@@ -104,6 +111,7 @@ def connect(*segments: Segment) -> tuple[dict, ...]:
             "values": pos_profile[1][1]
         }
     }
+    
     vel_profile = {
         "x": {
             "time": vel_profile[0][0],
@@ -114,6 +122,7 @@ def connect(*segments: Segment) -> tuple[dict, ...]:
             "values": vel_profile[1][1]
         }
     }
+    
     acc_profile = {
         "x": {
             "time": acc_profile[0][0],
