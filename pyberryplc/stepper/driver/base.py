@@ -284,7 +284,7 @@ class ProfileRotatorThreaded(NonBlockingRotator):
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
-        angles = [i * step_angle for i in range(num_steps + 1)]
+        angles = [self._motion_profile.s_ini + i * step_angle for i in range(num_steps + 1)]
         times = list(map(self._motion_profile.get_time_position_fn(), angles))
         delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
         self._queue = deque(delays)

@@ -1,10 +1,8 @@
 from typing import Callable, Type, Any, TypeVar
 from logging import Logger
 from pyberryplc.core import AbstractPLC, SharedData, CounterUp
-from pyberryplc.motion.multi_axis import ProfileType
-from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory
+from pyberryplc.motion.trajectory import Trajectory
 
-from multiprocessing import Pipe
 from pyberryplc.stepper import (
     StepperMotor,
     TMC2208StepperMotor,
@@ -12,6 +10,8 @@ from pyberryplc.stepper import (
     PinConfig,
     TrajectoryProcess
 )
+
+from config_loader import load_motor_config_toml
 
 
 TStepperMotor = TypeVar("TStepperMotor", bound=StepperMotor)
@@ -28,12 +28,40 @@ class MotorController:
         comm_port: str = "",
         logger: Logger | None = None,
     ) -> None:
+        """Creates a `TrajectoryProcess` in which a `StepperMotor` instance will
+        be instantiated.
+        
+        Parameters
+        ----------
+        motor_name:
+            A name to identify the motor.
+        motor_class:
+            Specific derived class of abstract base class `StepperMotor` that
+            will be instantiated inside the `TrajectoryProcess` instance.
+        pin_config:
+            Configuration of the GPIO pins that will be used to control the 
+            stepper driver.
+        cfg_callback:
+            Callback function that accepts the derived `StepperMotor` object
+            and will be called from inside the `TrajectoryProcess` to set the 
+            stepper driver (enabling the driver, configuration of microstepping, 
+            setting maximum run and hold current, ...).
+        comm_port:
+            In case the `TMC2208StepperMotor` class is used with the 
+            UART-interface (class `TMC2208UART`), the serial port to be used 
+            needs to be specified.
+        logger:
+            Logger to log messages from the `StepperMotor` instance to logfile 
+            or console.
+        """
         self.motor_name = motor_name
         self.motor_class = motor_class
         self.pin_config = pin_config
         self.cfg_callback = cfg_callback
         self.comm_port = comm_port
         self.logger = logger
+
+        from multiprocessing import Pipe
         self.interface, _motor_proc = Pipe()
 
         motor_kwargs: dict[str, Any] = {
@@ -53,12 +81,29 @@ class MotorController:
         )
     
     def enable(self) -> None:
+        """
+        Starts the `run()` method of the `TrajectoryProcess` object.
+        """
         self._motor_proc.start()
     
     def disable(self) -> None:
+        """
+        Finishes the `TrajectoryProcess` object.
+        """
         self._motor_proc.join()
     
-    def update_status(self, callback: Callable[[dict[str, Any]], None]) -> None:
+    def update_status(
+        self, 
+        callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """Receives status updates from the `TrajectorProcess` object.
+        
+        Parameters
+        ----------
+        callback:
+            Function that accepts a status message and processes it in the PLC
+            application. 
+        """
         if self.interface.poll():
             msg = self.interface.recv()
             callback(msg)
@@ -68,69 +113,12 @@ class XYMotionPLC(AbstractPLC):
     
     def __init__(self, shared_data: SharedData, logger: Logger):
         super().__init__(shared_data=shared_data, logger=logger)
-        
-        # Setup of X-motor controller
-        def _config_x_motor(motor: TMC2208StepperMotor) -> None:
-            motor.enable(high_sensitivity=True)
-            motor.configure_microstepping(
-                resolution="full",
-                ms_pins=None,
-                full_steps_per_rev=200
-            )
-            motor.set_current_via_uart(
-                run_current_pct=35.0,
-                hold_current_pct=10.0
-            )
-        
-        self.x_motor_controller = MotorController(
-            motor_name="Motor X",
-            motor_class=TMC2208StepperMotor,
-            pin_config=PinConfig(step_pin_ID=21, dir_pin_ID=27, use_pigpio=True),
-            cfg_callback=_config_x_motor,
-            comm_port="/dev/ttyUSB1",
-            logger=self.logger
-        )
-        self.x_interface = self.x_motor_controller.interface
-        
-        # Setup of Y-motor controller
-        def _config_y_motor(motor: TMC2208StepperMotor) -> None:
-            motor.enable(high_sensitivity=True)
-            motor.configure_microstepping(
-                resolution="full",
-                ms_pins=None,
-                full_steps_per_rev=200
-            )
-            motor.set_current_via_uart(
-                run_current_pct=35.0,
-                hold_current_pct=10.0
-            )
-
-        self.y_motor_controller = MotorController(
-            motor_name="Motor Y",
-            motor_class=TMC2208StepperMotor,
-            pin_config=PinConfig(step_pin_ID=19, dir_pin_ID=20, use_pigpio=True),
-            cfg_callback=_config_y_motor,
-            comm_port="/dev/ttyUSB0",
-            logger=self.logger
-        )
-        self.y_interface = self.y_motor_controller.interface
-        
-        # Set up trajectory planner
-        self.trajectory_planner = TrajectoryPlanner(
-            pitch=100,
-            motor_speed=180.0,
-            motor_accel=360.0,
-            full_steps_per_rev=200,
-            microstep_factor=1,
-            profile_type=ProfileType.S_CURVED
-        )
         self.trajectory: Trajectory | None = None
-      
+              
         # Internal markers
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")
         self.X2 = self.add_marker("X2")
-        
         self.trajectory_ready = self.add_marker("ready", init_value=False)
         
         # HMI-inputs
@@ -139,10 +127,10 @@ class XYMotionPLC(AbstractPLC):
         # HMI-outputs (status feedback)
         self.x_motor_busy = self.hmi_output_register["x_motor_busy"]
         self.y_motor_busy = self.hmi_output_register["y_motor_busy"]
-        self.travel_time_x = self.hmi_output_register["travel_time_x"]
-        self.travel_time_y = self.hmi_output_register["travel_time_y"]
         self.x_motor_ready = self.hmi_output_register["x_motor_ready"]
         self.y_motor_ready = self.hmi_output_register["y_motor_ready"]
+        self.travel_time_x = self.hmi_output_register["travel_time_x"]
+        self.travel_time_y = self.hmi_output_register["travel_time_y"]
         
         # Counters
         self.segment_counter = CounterUp(preset_val=1)
@@ -150,35 +138,82 @@ class XYMotionPLC(AbstractPLC):
         # Internal data variables
         self._init_flag = False
         self.num_segments = 0
+    
+    def _setup_motion_control(self):
+        config = load_motor_config_toml("motor_config.toml")
+        x_cfg = config["x_motor"]
+        y_cfg = config["y_motor"]
+
+        # Setup of X-axis motor controller
+        self.x_motor_controller = MotorController(
+            motor_name="X-axis",
+            motor_class=TMC2208StepperMotor,
+            pin_config=PinConfig(
+                step_pin_ID=x_cfg["step_pin_ID"], 
+                dir_pin_ID=x_cfg["dir_pin_ID"], 
+                use_pigpio=True
+            ),
+            cfg_callback=lambda m: _config_motor(m, x_cfg),
+            comm_port=x_cfg["comm_port"],
+            logger=self.logger
+        )
+        self.x_interface = self.x_motor_controller.interface
+        
+        # Setup of Y-axis motor controller
+        self.y_motor_controller = MotorController(
+            motor_name="Y-axis",
+            motor_class=TMC2208StepperMotor,
+            pin_config=PinConfig(
+                step_pin_ID=y_cfg["step_pin_ID"], 
+                dir_pin_ID=y_cfg["dir_pin_ID"], 
+                use_pigpio=True
+            ),
+            cfg_callback=lambda m: _config_motor(m, y_cfg),
+            comm_port=y_cfg["comm_port"],
+            logger=self.logger
+        )
+        self.y_interface = self.y_motor_controller.interface
+        
+        # Callback function for configuring the TMC2208 stepper motor drivers
+        def _config_motor(motor: TMC2208StepperMotor, cfg: dict) -> None:
+            motor.enable(high_sensitivity=cfg.get("high_sensitivity", True))
+            motor.configure_microstepping(
+                resolution=cfg["microstepping"]["resolution"],
+                ms_pins=None,
+                full_steps_per_rev=cfg["microstepping"]["full_steps_per_rev"]
+            )
+            motor.set_current_via_uart(
+                run_current_pct=cfg["current"]["run_current_pct"],
+                hold_current_pct=cfg["current"]["hold_current_pct"]
+            )
 
     def _init_control(self):
         if not self._init_flag:
             self._init_flag = True
-
+            self._setup_motion_control()
             self.x_motor_controller.enable()
             self.y_motor_controller.enable()
-
             self.X0.activate()
     
     def _sequence_control(self):
         # Get feedback from motor controllers
-        self.x_motor_controller.update_status(self._process_status_x_motor)
-        self.y_motor_controller.update_status(self._process_status_y_motor)
+        self.x_motor_controller.update_status(self._process_status_x_axis)
+        self.y_motor_controller.update_status(self._process_status_y_axis)
         
         # Transition logic
         if self.X0.active and self.start_motion.active:
-            self.logger.info("Prepare trajectory")
+            self.logger.info("prepare trajectory")
             self.X0.deactivate()
             self.X1.activate()  # prepare trajectory
 
         if self.X1.active and self.trajectory_ready.active:
-            self.logger.info("Execute trajectory.")
+            self.logger.info("run trajectory")
             self.trajectory_ready.update(False)
             self.X1.deactivate()
             self.X2.activate()  # execute trajectory
 
         if self.X2.active and self._trajectory_finished():
-            self.logger.info("Trajectory finished.")
+            self.logger.info("trajectory done")
             self.X2.deactivate()
             self.X0.activate()
 
@@ -189,56 +224,47 @@ class XYMotionPLC(AbstractPLC):
             self.segment_counter.reset()
         
         if self.X1.rising_edge:
-            # Prepare trajectory
-            segments = self.shared_data.hmi_data["segments"]
-            
-            for segment in segments:
-                self.logger.info(f"received segment {segment}")
-                        
-            self.trajectory = self.trajectory_planner.create_trajectory(*segments)
-            self.num_segments = len(segments)
-            
+            # Get trajectory segments
+            self.trajectory = self.shared_data.hmi_data["segments"]
+            self.num_segments = len(self.trajectory)
             self.trajectory_ready.update(True)
             self.x_motor_busy.update(True)
             self.y_motor_busy.update(True)
-            
             self.x_motor_ready.update(True)
             self.y_motor_ready.update(True)
         
-        if self.X2.active:
-            # Execute trajectory segment per segment
-            if self.x_motor_ready.active and self.y_motor_ready.active:
-                
-                self.logger.info(f"Execute segment {self.segment_counter.value}")
-                
-                self.x_motor_ready.update(False)
-                self.y_motor_ready.update(False)
-                
-                segment = self.trajectory[self.segment_counter.value - 1]
-                
-                self.logger.info(f"Segment has {len(segment.x_delays)} delays in x.")
-                self.logger.info(f"Segment has {len(segment.y_delays)} delays in y.")
-                self.logger.info(f"Rotation direction of X-axis: {segment.x_direction}")
-                self.logger.info(f"Rotation direction of Y-axis: {segment.y_direction}")
+        if self.X2.active and self.x_motor_ready.active and self.y_motor_ready.active:
+            # Execute trajectory segment by segment
+            self.logger.info(f"run segment {self.segment_counter.value}")
 
-                self.x_interface.send({
-                    "cmd": "start_segment",
-                    "delays": segment.x_delays,
-                    "direction": segment.x_direction,
-                })
-                self.y_interface.send({
-                    "cmd": "start_segment",
-                    "delays": segment.y_delays,
-                    "direction": segment.y_direction,
-                })
-                
-                self.segment_counter.count_up()
+            # block step X2 while a segment is still running
+            self.x_motor_ready.update(False)
+            self.y_motor_ready.update(False)
+            
+            segment = self.trajectory[self.segment_counter.value - 1]
+            self.shared_data.hmi_data["segment_count"] = self.segment_counter.value
+            
+            self.x_interface.send({
+                "cmd": "start_segment",
+                "delays": segment.x_delays,
+                "direction": segment.x_direction,
+            })
+            self.y_interface.send({
+                "cmd": "start_segment",
+                "delays": segment.y_delays,
+                "direction": segment.y_direction,
+            })
+            
+            self.segment_counter.count_up()
     
-    def _process_status_x_motor(self, msg: dict[str, Any]) -> None:
+    def _process_status_x_axis(self, msg: dict[str, Any]) -> None:
         status = msg.get("status")
-        self.logger.info(f"Feedback from X-motor: {status}")
         if status == "segment_done":
             self.travel_time_x.update(msg.get("travel_time", float('nan')))
+            self.logger.info(
+                f"segment {self.segment_counter.value - 1}: "
+                f"travel time X-axis = {self.travel_time_x.state:.3f} s"
+            )
             if self.segment_counter.value <= self.num_segments:
                 self.x_motor_ready.update(True)
             else:
@@ -251,11 +277,14 @@ class XYMotionPLC(AbstractPLC):
             )
             raise RuntimeError("Startup error in motor X")
     
-    def _process_status_y_motor(self, msg: dict[str, Any]) -> None:
+    def _process_status_y_axis(self, msg: dict[str, Any]) -> None:
         status = msg.get("status")
-        self.logger.info(f"Feedback from Y-motor: {status}")
         if status == "segment_done":
             self.travel_time_y.update(msg.get("travel_time", float('nan')))
+            self.logger.info(
+                f"segment {self.segment_counter.value - 1}: "
+                f"travel time Y-axis = {self.travel_time_y.state:.3f} s"
+            )
             if self.segment_counter.value <= self.num_segments:
                 self.y_motor_ready.update(True)
             else:
@@ -283,14 +312,11 @@ class XYMotionPLC(AbstractPLC):
 
     def exit_routine(self):
         self.logger.info("Exit. Shutting down...")
-
         self.x_interface.send({"cmd": "shutdown"})
         self.y_interface.send({"cmd": "shutdown"})
-
         self.x_motor_controller.disable()
         self.y_motor_controller.disable()
-
-        self.logger.info("Motorcontrollers stopped.")
+        self.logger.info("Motion controller stopped.")
 
     def emergency_routine(self):
         self.logger.warning("Emergency stop. Shutting down...")

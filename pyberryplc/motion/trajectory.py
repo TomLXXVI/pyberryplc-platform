@@ -1,3 +1,5 @@
+import numpy as np
+
 from .multi_axis import (
     Direction, 
     MotionProfile, 
@@ -355,8 +357,8 @@ class Segment:
 
     @property
     def x_motion(self) -> tuple[MotionProfile, Direction] | None:
-        """Returns the segment's motion profile and rotation direction along 
-        the X-axis.
+        """Returns the segment's absolute motion profile and rotation direction 
+        along the X-axis.
         """
         if self._xy_motion_control is not None:
             return self._mp_x, self._dir_x
@@ -364,8 +366,8 @@ class Segment:
 
     @property
     def y_motion(self) -> tuple[MotionProfile, Direction] | None:
-        """Returns the segment's motion profile and rotation direction along 
-        the Y-axis.
+        """Returns the segment's absolute motion profile and rotation direction 
+        along the Y-axis.
         """
         if self._xy_motion_control is not None:
             return self._mp_y, self._dir_y
@@ -389,10 +391,12 @@ class Segment:
     
     @property
     def x_direction(self) -> Direction:
+        """Returns the rotation direction of the X-axis motor."""
         return self._dir_x
 
     @property
     def y_direction(self) -> Direction:
+        """Returns the rotation direction of the Y-axis motor."""
         return self._dir_y
     
     @property
@@ -412,8 +416,83 @@ class Segment:
         if self._mp_y is not None:
             return self._mp_y.v_fin
         return None
+    
+    @property
+    def position_profiles(self) -> tuple | None:
+        """
+        Returns the position profiles along the X-axis and the Y-axis, taking
+        account of the rotation direction of the X-axis and Y-axis motors.
+        
+        A position profile is a tuple of two arrays, the time values and the
+        corresponding position values.
+        """
+        if self._xy_motion_control is not None:
+            tx_arr, thetax_arr = self._mp_x.position_profile()
+            x_arr = thetax_arr / self._xy_motion_control._N
+            if self._dir_x == Direction.CLOCKWISE:
+                x0 = x_arr[0]
+                dx_arr = x_arr - x0
+                x0_arr = np.full_like(x_arr, x0)
+                x_arr = x0_arr - dx_arr
+            pos_x = (tx_arr, x_arr)
+            
+            ty_arr, thetay_arr = self._mp_y.position_profile()
+            y_arr = thetay_arr / self._xy_motion_control._N
+            if self._dir_y == Direction.CLOCKWISE:
+                y0 = y_arr[0]
+                dy_arr = y_arr - y0
+                y0_arr = np.full_like(y_arr, y0)
+                y_arr = y0_arr - dy_arr
+            pos_y = (ty_arr, y_arr)
+            
+            return pos_x, pos_y
+        return None
 
-
+    @property
+    def velocity_profiles(self) -> tuple | None:
+        """
+        Returns the velocity profiles along the X-axis and the Y-axis, taking
+        account of the rotation direction of the X-axis and Y-axis motors.
+        Counterclockwise velocities are positive, while clockwise velocities are
+        negative.
+        
+        A velocity profile is a tuple of two arrays, the time values and the
+        corresponding velocity values.
+        """
+        if self._xy_motion_control is not None:
+            tx_arr, omegax_arr = self._mp_x.velocity_profile()
+            vx_arr = omegax_arr / self._xy_motion_control._N
+            if self._dir_x == Direction.CLOCKWISE:
+                vx_arr *= -1.0
+            vel_x = (tx_arr, vx_arr)
+            
+            ty_arr, omegay_arr = self._mp_y.velocity_profile()
+            vy_arr = omegay_arr / self._xy_motion_control._N
+            if self._dir_y == Direction.CLOCKWISE:
+                vy_arr *= -1.0
+            vel_y = (ty_arr, vy_arr)
+            
+            return vel_x, vel_y
+        return None
+    
+    @property
+    def acceleration_profiles(self) -> tuple | None:
+        """
+        Returns the acceleration profiles along the X-axis and the Y-axis.
+        
+        An acceleration profile is a tuple of two arrays, the time values and 
+        the corresponding acceleration values.
+        """
+        if self._xy_motion_control is not None:
+            tx_arr, alphax_arr = self._mp_x.acceleration_profile()
+            ax_arr = alphax_arr / self._xy_motion_control._N
+            acc_x = (tx_arr, ax_arr)
+            ty_arr, alphay_arr = self._mp_y.acceleration_profile()
+            ay_arr = alphay_arr / self._xy_motion_control._N
+            acc_y = (ty_arr, ay_arr)
+            return acc_x, acc_y
+        return None
+    
 class Trajectory(list[Segment]):
     """A `Trajectory` object is a list of `Segment` objects."""
     pass
@@ -485,7 +564,7 @@ class TrajectoryPlanner:
         Segment.set_stepper_motors(x_motor, y_motor)
     
     @staticmethod
-    def create_trajectory(*segments: tuple[Point, Point]) -> Trajectory:
+    def create_trajectory(*points: Point) -> Trajectory:
         """Creates a `Trajectory` object from a sequence of segments. A segment 
         is represented as a two-element tuple containing the start and end point
         of the line segment. A point is also a two-element tuple with the x- and
@@ -493,6 +572,11 @@ class TrajectoryPlanner:
         """
         # Create a new `Trajectory` object.
         trajectory = Trajectory()
+        
+        # Create segments by grouping the points in pairs
+        start_points = points[:-1]
+        end_points = points[1:]
+        segments = [(sp, ep) for sp, ep in zip(start_points, end_points)]
         
         # Create `Segment` objects and append them to the `Trajectory` object.
         speed_ini_x = 0.0

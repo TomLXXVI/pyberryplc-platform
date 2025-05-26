@@ -1,5 +1,6 @@
 import numpy as np
-from .multi_axis import MotionProfile
+from .multi_axis import Direction
+from .trajectory import Segment
 
 
 def get_pitch(revs: int, distance: float) -> float:
@@ -21,8 +22,8 @@ def get_pitch(revs: int, distance: float) -> float:
     return pitch
 
 
-def connect(*mps: MotionProfile):
-    """Connects the motion profiles of segments in a trajectory.
+def connect(*segments: Segment) -> tuple[dict, ...]:
+    """Connects the segments in a trajectory.
 
     Returns
     -------
@@ -39,44 +40,32 @@ def connect(*mps: MotionProfile):
         the tuple is the time array, the second element is the corresponding 
         acceleration array.
     """
-    def _connect_vel(*mps: MotionProfile):
-        """Connects the velocity profiles.
-    
-        Returns
-        -------
-        t_arr:
-            Time array.
-        v_arr:
-            Corresponding velocity array.
+    def _connect_vel(*segments: Segment):
         """
-        t_arr, v_arr = _connect(*[mp.velocity_profile() for mp in mps])
-        return t_arr, v_arr
-    
-    def _connect_pos(*mps: MotionProfile):
-        """Connects the position profiles.
-    
-        Returns
-        -------
-        t_arr:
-            Time array.
-        s_arr:
-            Corresponding position array.
+        Connects the velocity profiles.
         """
-        t_arr, s_arr = _connect(*[mp.position_profile() for mp in mps])
-        return t_arr, s_arr
+        vel_x_lst, vel_y_lst = zip(*[segment.velocity_profiles for segment in segments])
+        vel_x_connected = _connect(*vel_x_lst)
+        vel_y_connected = _connect(*vel_y_lst)
+        return vel_x_connected, vel_y_connected
     
-    def _connect_acc(*mps: MotionProfile):
-        """Connects the acceleration profiles.
-    
-        Returns
-        -------
-        t_arr:
-            Time array.
-        a_arr:
-            Corresponding acceleration array.
+    def _connect_pos(*segments: Segment):
         """
-        t_arr, a_arr = _connect(*[mp.acceleration_profile() for mp in mps])
-        return t_arr, a_arr
+        Connects the position profiles.
+        """
+        pos_x_lst, pos_y_lst = zip(*[segment.position_profiles for segment in segments])
+        pos_x_connected = _connect(*pos_x_lst)
+        pos_y_connected = _connect(*pos_y_lst)
+        return pos_x_connected, pos_y_connected
+    
+    def _connect_acc(*segments: Segment):
+        """
+        Connects the acceleration profiles.
+        """
+        acc_x_lst, acc_y_lst = zip(*[segment.acceleration_profiles for segment in segments])
+        acc_x_connected = _connect(*acc_x_lst)
+        acc_y_connected = _connect(*acc_y_lst)
+        return acc_x_connected, acc_y_connected
     
     def _connect(*profiles):
         """Connects the profiles (position, velocity, or acceleration) of the 
@@ -101,9 +90,38 @@ def connect(*mps: MotionProfile):
         arr_concat = np.concatenate(tuple(arr_lst))
         return t_arr_concat, arr_concat
     
-    mps = tuple(mp for mp in mps if isinstance(mp, MotionProfile))
-    pos_profile = _connect_pos(*mps)
-    vel_profile = _connect_vel(*mps)
-    acc_profile = _connect_acc(*mps)
-    
+    pos_profile = _connect_pos(*segments)
+    vel_profile = _connect_vel(*segments)
+    acc_profile = _connect_acc(*segments)
+        
+    pos_profile = {
+        "x": {
+            "time": pos_profile[0][0],
+            "values": pos_profile[0][1]
+        },
+        "y": {
+            "time": pos_profile[1][0],
+            "values": pos_profile[1][1]
+        }
+    }
+    vel_profile = {
+        "x": {
+            "time": vel_profile[0][0],
+            "values": vel_profile[0][1]
+        },
+        "y": {
+            "time": vel_profile[1][0],
+            "values": vel_profile[1][1]
+        }
+    }
+    acc_profile = {
+        "x": {
+            "time": acc_profile[0][0],
+            "values": acc_profile[0][1]
+        },
+        "y": {
+            "time": acc_profile[1][0],
+            "values": acc_profile[1][1]
+        }
+    }
     return pos_profile, vel_profile, acc_profile

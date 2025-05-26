@@ -96,6 +96,7 @@ class AbstractHMI(ABC):
     class Pages(StrEnum):
         HMI_PAGE = "hmi_page"
         LOG_PAGE = "log_page"
+        SHUTDOWN_PAGE = "shutdown_page"
     
     def __init__(
         self,
@@ -103,7 +104,7 @@ class AbstractHMI(ABC):
         app,
         ui,
         shared_data: SharedData,
-        plc_app: Type[AbstractPLC],
+        plc_app: Type[AbstractPLC] | None,
         logger: Logger,
         port: int = 8081,
     ) -> None:
@@ -133,7 +134,7 @@ class AbstractHMI(ABC):
         self.logger = logger
         self.port = port
         
-        self._plc_manager = PLCThreadManager(self)
+        self._plc_manager = PLCThreadManager(self) if self.plc_app else None
         self._plc_crash_dialog = None
         self.clean_exit: bool = False
         self.exit_flag: bool = False
@@ -180,9 +181,10 @@ class AbstractHMI(ABC):
         - Log updates every 1.0 second
         - Status updates every 0.5 seconds
         """
-        self.ui.timer(0.5, self._plc_manager.start_plc, once=True)
-        self.ui.timer(1.0, self._update_log_page)
-        self.ui.timer(0.5, self._update_status)
+        if self._plc_manager:
+            self.ui.timer(0.5, self._plc_manager.start_plc, once=True)
+            self.ui.timer(1.0, self._update_log_page)
+            self.ui.timer(0.5, self._update_status)
 
     @staticmethod
     def set_button_state(button, enabled: bool) -> None:
@@ -210,7 +212,11 @@ class AbstractHMI(ABC):
         @self.ui.page("/log")
         async def log_page():
             self._build_log_page()
-
+        
+        @self.ui.page("/shutdown")
+        async def shutdown_page():
+            self._build_shutdown_page()
+        
         self.setup_timers()
         self.ui.run(title=self.title, port=self.port, reload=False, show=False)
 
@@ -219,8 +225,10 @@ class AbstractHMI(ABC):
         exit_dialog = ExitDialog(self)
         await exit_dialog.show()
         if self.exit_flag:
-            self.logger.info("Clean exit PLC")
-            self._plc_manager.exit_plc()
+            self.ui.navigate.to("/shutdown")
+            self.logger.info("Shutting down PLC and HMI...")
+            if self._plc_manager:
+                self._plc_manager.exit_plc()
             self.ui.timer(2.0, self.app.shutdown, once=True)
     
     def _build_navbar(self):
@@ -262,7 +270,22 @@ class AbstractHMI(ABC):
                 f'{log_html}'
                 f'</pre>'
             )
-
+    
+    def _build_shutdown_page(self) -> None:
+        with self.ui.column() \
+            .classes(
+            "absolute-center "
+            "items-center "
+            "gap-4 "
+            "bg-gray-100 "
+            "p-6 "
+            "rounded-lg "
+            "shadow-md"
+        ):
+            self.ui.label("Application Terminated").classes("text-2xl font-bold")
+            self.ui.label("The PLC and HMI application have been shut down.")
+            self.ui.label("You may now close this browser window.")
+    
     def _read_log_file(self) -> str | None:
         log_file = Path("logs/plc.log")
         if not log_file.exists():
@@ -336,12 +359,13 @@ class PLCCrashDialog:
 
     def _abort_hmi(self) -> None:
         self.close()
-        self.hmi.logger.warning("PLC operation aborted")
+        self.hmi.logger.warning("PLC operation has been aborted by the user...")
         self.hmi.app.shutdown()
 
     def _restart_plc(self) -> None:
         self.close()
-        self.hmi._plc_manager.restart_plc()
+        if self.hmi._plc_manager:
+            self.hmi._plc_manager.restart_plc()
 
     def open(self) -> None:
         self._dialog.open()

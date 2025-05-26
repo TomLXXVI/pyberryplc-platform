@@ -163,9 +163,9 @@ class MotionProfileProcess(multiprocessing.Process):
 
 class TrajectoryProcess(multiprocessing.Process):
     """
-    Motor control process that directly receives a step pulse train to drive 
-    the stepper motor. Processing of the motion profile must have been done in 
-    advance.
+    Motor control process that directly receives the delays between step pulses 
+    to drive the stepper motor. Processing of the motion profiles must have been
+    done in advance.
 
     Parameters
     ----------
