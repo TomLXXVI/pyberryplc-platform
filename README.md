@@ -19,6 +19,7 @@ affordable hardware such as the Raspberry Pi, this is entirely feasible.
 
 This software might be useful for anyone interested in practical automation and motion control applications.
 
+![PyBerryPLC HMI Screenshot](media/screenshot.png)
 
 ## Package Structure
 
