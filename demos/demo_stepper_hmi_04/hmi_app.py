@@ -9,9 +9,9 @@ from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.motion_profile import ProfileType
-from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory
-from pyberryplc.motion.utils import get_pitch, connect
+from pyberryplc.motion.multi_axis import MotionProfileType
+from pyberryplc.motion.trajectory import Trajectory2DPlanner, Trajectory2D
+from pyberryplc.motion.utils import get_pitch
 
 from plc_app import XYMotionPLC
 
@@ -40,7 +40,7 @@ class XYMotionHMI(AbstractHMI):
         )
 
         self.points: list[tuple[float, float]] = []
-        self.trajectory = Trajectory()
+        self.trajectory = Trajectory2D()
         self.trajectory_fig = go.Figure(go.Scatter(x=[0.0], y=[0.0]))
         self.trajectory_fig.update_layout(
             title=None,
@@ -78,22 +78,26 @@ class XYMotionHMI(AbstractHMI):
         self.profile_dialog = MotionProfileDialog(self)
         
         self.ui.label(self.title).classes("text-2xl font-bold mb-4")
-
-        self.ui.label("Upload a .csv file with X,Y coordinates:")
-        self.ui.upload(on_upload=self._handle_upload, auto_upload=True, max_files=1)
         
-        self.ui.label("Planned XY Trajectory").classes("text-xl font-bold")
-        with self.ui.row().classes("items-center"):
-            self.ui.label("Y [mm]") \
-                .classes("text-base mr-1") \
-                .style("width: 2rem; text-align: center;")
-
-            with self.ui.column().classes("items-center"):
-                self.trajectory_plot = self.ui.plotly(self.trajectory_fig).classes("w-[500px] h-[500px]")
-                self.ui.label("X [mm]").classes("text-base mt-1")
+        with self.ui.card():
+            with self.ui.row():
+                with self.ui.column():
+                    self.ui.label("Upload a .csv file with X,Y coordinates:")
+                    self.ui.upload(on_upload=self._handle_upload, auto_upload=True, max_files=1)
+            
+                with self.ui.column().classes("items-center"):
+                    self.ui.label("Planned XY Trajectory").classes("text-xl font-bold")
+                    with self.ui.row().classes("items-center"):
+                        self.ui.label("Y [mm]") \
+                            .classes("text-base mr-1") \
+                            .style("width: 2rem; text-align: center;")
+                        with self.ui.column().classes("items-center"):
+                            self.trajectory_plot = self.ui.plotly(self.trajectory_fig).classes("w-[500px] h-[500px]")
+                            self.ui.label("X [mm]").classes("text-base mt-1")
         
-        self.ui.button("Verify Motion Profiles", on_click=partial(self.profile_dialog.open, self.points))
-        self.ui.button("Send to PLC", on_click=self._send_to_plc)
+        with self.ui.row():
+            self.ui.button("Verify Motion Profiles", on_click=partial(self.profile_dialog.open, self.points))
+            self.ui.button("Send to PLC", on_click=self._send_to_plc)
 
     def _handle_upload(self, e: UploadEventArguments):
         try:
@@ -298,8 +302,8 @@ class MotionProfileDialog:
         self.plot.update()
     
     async def open(self, points: list[tuple[float, float]]):
-        # first show the overlay with spinner during the calculation of motion 
-        # profiles...
+        # first show the overlay with spinner during calculation of motion 
+        # profiles
         self._overlay.open()
         try:
             await self._compute_trajectory(points)
@@ -309,23 +313,26 @@ class MotionProfileDialog:
                 color="red"
             )
         self._overlay.close()
-        # when calculations are done, open motion profile dialog... 
+        
+        # when calculations are done, show motion profile dialog... 
         self.selected_profile = "velocity"
         self._update_profile_plot()
         self._dialog.open()
-        
+    
     async def _compute_trajectory(self, points: list[tuple[float, float]]):
-        
-        await asyncio.sleep(1)  # only here to test
-        
-        trajectory_planner = TrajectoryPlanner(
+        trajectory_planner = Trajectory2DPlanner(
             pitch=get_pitch(1, 0.01),
             motor_speed=180.0,
             motor_accel=360.0,
             full_steps_per_rev=200,  # must match with motor configuration file
-            microstep_factor=2,      # must match with motor configuration file
-            profile_type=ProfileType.S_CURVED,
+            microstep_factor=2,  # must match with motor configuration file
+            profile_type=MotionProfileType.S_CURVED,
         )
         points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
-        self.hmi.trajectory = trajectory_planner.create_trajectory(*points)
+        # `trajectory_planner.get_trajectory(*points)` may be a long running task.
+        # Therefore, we run it with asyncio in a separate thread in order not to 
+        # block NiceGui's event loop. Using `asyncio.to_thread(...)` avoids blocking
+        # while preserving access to complex return objects (e.g., Trajectory2D),
+        # which would not be safely transferable via ProcessPoolExecutor.
+        self.hmi.trajectory = await asyncio.to_thread(trajectory_planner.get_trajectory, *points)
         self.pos, self.vel, self.acc = self.hmi.trajectory.motion_profiles

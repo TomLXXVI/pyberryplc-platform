@@ -5,7 +5,7 @@ from pyberryplc.stepper import (
     PinConfig,
     TMC2208UART,
     RotatorType,
-    Direction
+    RotationDirection
 )
 from pyberryplc.motion.single_axis import TrapezoidalProfile
 
@@ -26,7 +26,7 @@ class StepperMotorPLC(AbstractPLC):
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
         self.stepper.attach_rotator(RotatorType.DYNAMIC_THREADED)
-        self.stepper.rotator.profile = TrapezoidalProfile(v_m=90.0, dt_ini=0.5, dt_tot=720.0)
+        self.stepper.rotator.profile = TrapezoidalProfile(v_m=90.0, dt_i=0.5, dt_tot=720.0)
         
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")
@@ -82,11 +82,11 @@ class StepperMotorPLC(AbstractPLC):
             self.stepper.rotator.stop()
             
         if self.X1.rising_edge:
-            self.stepper.rotator.direction = Direction.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
             self.stepper.rotator.start()
          
         if self.X2.rising_edge:
-            self.stepper.rotator.direction = Direction.CLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CLOCKWISE
             self.stepper.rotator.start()
     
     def _update_statuses(self):

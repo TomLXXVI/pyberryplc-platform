@@ -1,31 +1,39 @@
+import warnings
 from typing import Any
+from dataclasses import dataclass
+
 import numpy as np
+from scipy.optimize import root_scalar, minimize_scalar
 
 from pyberryplc.stepper.driver.process import TwoStageProfileRotator
-from .motion_profile import (
-    Direction, 
+
+from .multi_axis import (
+    RotationDirection, 
     MotionProfile, 
     TrapezoidalProfile, SCurvedProfile, 
-    ProfileType
+    MotionProfileType
 )
 
-Point = tuple[float, float]
+
+TPoint = tuple[float, float]
+TSegment = tuple[TPoint, TPoint]
 
 
-class XYMotionController:
+class XYMotionProcessor:
     """
     Generates the motion profiles along the X- and Y-axis to move from one 
-    point to another point along a straight line segment (synchronised X- and 
-    Y-axis motion).
+    point to the next along a rectilinear segment (i.e. X- and Y-movements
+    are synchronized).
     """
     def __init__(
         self,
         pitch: float,
         motor_speed: float,
         motor_accel: float,
-        profile_type: ProfileType = ProfileType.TRAPEZOIDAL
+        profile_type: MotionProfileType = MotionProfileType.TRAPEZOIDAL
     ) -> None:
-        """Initializes the `XYMotionControl` object.
+        """
+        Initializes the `XYMotionControl` object.
 
         Parameters
         ----------
@@ -42,214 +50,178 @@ class XYMotionController:
             The type of motion profile. Either a trapezoidal (default) or 
             S-curved motion profile.
         """
-        if profile_type in ProfileType.get_types():
+        if profile_type in MotionProfileType.get_types():
             self.profile_type = profile_type
         else:
             raise TypeError(f"Profile type '{profile_type}' does not exist.")
+        
         self.pitch = pitch
-        self.motor_speed = motor_speed
-        self.motor_accel = motor_accel
+        self.v_m = motor_speed
+        self.a_m = motor_accel
 
         self._N = 360.0 * self.pitch  # convert revs/m -> deg/m
-        self._pt_start: Point = (0.0, 0.0)
-        self._pt_end: Point = (0.0, 0.0)
-        self._angle_ini_x: float = 0.0
-        self._angle_ini_y: float = 0.0
-        self._speed_ini_x: float = 0.0
-        self._speed_ini_y: float = 0.0
-        self._speed_fin_x: float | None = None
-        self._speed_fin_y: float | None = None
-        self._direction_x: Direction = Direction.COUNTERCLOCKWISE
-        self._direction_y: Direction = Direction.COUNTERCLOCKWISE
+        self._pt_i: TPoint = (0.0, 0.0)
+        self._pt_f: TPoint = (0.0, 0.0)
+        self._theta_xi: float = 0.0
+        self._theta_yi: float = 0.0
+        self._omega_xi: float = 0.0
+        self._omega_yi: float = 0.0
+        self._omega_xf: float | None = None
+        self._omega_yf: float | None = None
+        self._dir_x: RotationDirection = RotationDirection.COUNTERCLOCKWISE
+        self._dir_y: RotationDirection = RotationDirection.COUNTERCLOCKWISE
         self._dx: float = 0.0
         self._dy: float = 0.0
         self._dtheta_x: float = 0.0
         self._dtheta_y: float = 0.0
         self._mp_x: MotionProfile | None = None
         self._mp_y: MotionProfile | None = None
-
-    def set_points(self, pt_start: Point, pt_end: Point) -> None:
-        """Sets the start and end point of the linear motion."""
-        self._direction_x = Direction.COUNTERCLOCKWISE
-        self._direction_y = Direction.COUNTERCLOCKWISE
+    
+    def set_segmentdata(
+        self,
+        start: TPoint,
+        end: TPoint,
+        initial_speed: tuple[float, float] = (0.0, 0.0),
+        final_speed: tuple[float | None, float | None] = (None, None)
+    ) -> None:
+        """Sets the start and end point of the segment, and also the velocity 
+        components at the start and end point of the segment.
+        """
+        self._calc_displacements(start, end)
+        self._omega_xi, self._omega_yi = initial_speed
+        self._omega_xf, self._omega_yf = final_speed
+        # Erase any previous motion profiles
+        self._mp_x, self._mp_y = None, None
+    
+    def _calc_displacements(self, pt_i: TPoint, pt_f: TPoint) -> None:
+        self._dir_x = RotationDirection.COUNTERCLOCKWISE
+        self._dir_y = RotationDirection.COUNTERCLOCKWISE
+        self._pt_i = pt_i
+        self._pt_f = pt_f
         
-        self._pt_start = pt_start
-        self._pt_end = pt_end
-
-        self._angle_ini_x = self._N * pt_start[0]
-        self._angle_ini_y = self._N * pt_start[1]
-
-        self._dx = self._pt_end[0] - self._pt_start[0]
-        self._dy = self._pt_end[1] - self._pt_start[1]
+        # Initial angles of the X- and Y-axis motor shaft
+        self._theta_xi = self._N * pt_i[0]
+        self._theta_yi = self._N * pt_i[1]
+        
+        # Linear displacements along the X- and Y-axis
+        self._dx = self._pt_f[0] - self._pt_i[0]
+        self._dy = self._pt_f[1] - self._pt_i[1]
+        
+        # Rotation direction of the X- and Y-axis motor
         if self._dx < 0.0:
-            self._direction_x = Direction.CLOCKWISE
+            self._dir_x = RotationDirection.CLOCKWISE
             self._dx = abs(self._dx)
         if self._dy < 0.0:
-            self._direction_y = Direction.CLOCKWISE
+            self._dir_y = RotationDirection.CLOCKWISE
             self._dy = abs(self._dy)
         
+        # Angular displacements of the X- and Y-axis motor
         self._dtheta_x = self._N * self._dx
         self._dtheta_y = self._N * self._dy
-        
-        # Erase existing motion profiles
-        self._mp_x, self._mp_y = None, None
-
-    def set_boundary_velocities(
-        self,
-        speed_ini_x: float = 0.0,
-        speed_ini_y: float = 0.0,
-        speed_fin_x: float | None = None,
-        speed_fin_y: float | None = None
-    ) -> None:
-        """Sets the initial and final velocities of the linear motion in x and y.
-
-        The final velocity can be `None`, meaning that it is unknown. In that
-        case the final velocity will be equal to the top velocity of the 
-        motion.
-        """
-        self._speed_ini_x = speed_ini_x
-        self._speed_ini_y = speed_ini_y
-        self._speed_fin_x = speed_fin_x
-        self._speed_fin_y = speed_fin_y
-
-        # Erase existing motion profiles
-        self._mp_x, self._mp_y = None, None
 
     def _create_motion_profile(self, **kwargs) -> MotionProfile | None:
         # noinspection PyUnreachableCode
         match self.profile_type:
-            case ProfileType.TRAPEZOIDAL:
+            case MotionProfileType.TRAPEZOIDAL:
                 _MotionProfile = TrapezoidalProfile
-            case ProfileType.S_CURVED:
+            case MotionProfileType.S_CURVED:
                 _MotionProfile = SCurvedProfile
             case _:
                 _MotionProfile = TrapezoidalProfile
 
         mp = _MotionProfile(**kwargs)
         return mp
-
-    def _calc_motion_profiles(self) -> None:
-        """Calculates the synchronised profiles of X- and Y-axis motion.
-
-        The X- and Y-axis motion will have the same start and ending time,
-        independent of their displacement.
-        """
-        # Calculate the time it takes for each movement (x and y) to do the
-        # displacement at their initial velocity.
-        if self._speed_ini_x > 0.0 and self._speed_ini_y > 0.0:
-            dt_x = self._dtheta_x / self._speed_ini_x
-            dt_y = self._dtheta_y / self._speed_ini_y
-        else:
-            dt_x = self._dtheta_x / self.motor_speed
-            dt_y = self._dtheta_y / self.motor_speed
-        
-        # We take the movement that needs the longest travel time (smallest
-        # initial velocity and/or largest displacement) as the reference.
-        l_time = [dt_x, dt_y]
-        dt_tot = max(l_time)
-        index = l_time.index(dt_tot)
-        if index == 0:
-            ds_tot = self._dtheta_x
-            v_ini = self._speed_ini_x
-            v_fin = self._speed_fin_x
-            s_ini = self._angle_ini_x
-        else:
-            ds_tot = self._dtheta_y
-            v_ini = self._speed_ini_y
-            v_fin = self._speed_fin_y
-            s_ini = self._angle_ini_y
-
-        # If the initial velocity of the reference movement is lower than the 
-        # allowable motor speed, we initially try to accelerate this movement to
-        # maximum motor speed. However, it might happen then that the other 
-        # movement does not have enough time to finish. If this happens, we 
-        # gradually increase the travel time of the first motion. 
-        if v_ini <= self.motor_speed:
-            i_max = 10
-            i = 0
-            while i < i_max:
-                if i == 0: dt_tot = None  # Indicates to use maximum motor speed
-                mp_tmp = self._create_motion_profile(
-                    ds_tot=ds_tot,
-                    v_m=self.motor_speed,
-                    a_m=self.motor_accel,
-                    dt_tot=dt_tot,
-                    v_ini=v_ini,
-                    v_fin=v_fin,
-                    s_ini=s_ini
-                )
-                dt_tot = mp_tmp.dt_tot
-                if index == 0:
-                    self._mp_x = mp_tmp
-                    try:
-                        self._mp_y = self._create_motion_profile(
-                            ds_tot=self._dtheta_y,
-                            v_m=self.motor_speed,
-                            a_m=self.motor_accel,
-                            dt_tot=dt_tot,
-                            v_ini=self._speed_ini_y,
-                            v_fin=self._speed_fin_y,
-                            s_ini=self._angle_ini_y
-                        )
-                    except ValueError:
-                        dt_tot *= 1.1
-                        i += 1
-                        continue
-                else:
-                    self._mp_y = mp_tmp
-                    try:
-                        self._mp_x = self._create_motion_profile(
-                            ds_tot=self._dtheta_x,
-                            v_m=self.motor_speed,
-                            a_m=self.motor_accel,
-                            dt_tot=dt_tot,
-                            v_ini=self._speed_ini_x,
-                            v_fin=self._speed_fin_x,
-                            s_ini=self._angle_ini_x
-                        )
-                    except ValueError:
-                        dt_tot *= 1.1
-                        i += 1
-                        continue
-                break
-
-    @property
-    def x_motion(self) -> tuple[MotionProfile, Direction]:
-        """Returns the motion profile and rotation direction for the X-axis."""
-        if self._mp_x is None: self._calc_motion_profiles()
-        return self._mp_x, self._direction_x
-
-    @property
-    def y_motion(self) -> tuple[MotionProfile, Direction]:
-        """Returns the motion profile and rotation direction for the Y-axis."""
-        if self._mp_y is None: self._calc_motion_profiles()
-        return self._mp_y, self._direction_y
-
-
-class _DummyStepperMotor:
-    """Represents a dummy `StepperMotor` object to calculate the step pulse 
-    train (actually, the delays between successive step pulses) to drive a 
-    stepper motor.
     
-    This class is only intended as a "hack" to get access to the function 
-    `preprocess()` of class `TwoStageProfileRotator(ProfileRotator)` that 
-    calculates the delays between successive step pulses to drive a stepper 
-    motor.
+    @staticmethod
+    def _synchronize_profiles(mp_x: MotionProfile, mp_y: MotionProfile):
+        mp_lst = [mp_x, mp_y]
+        dt_tot_lst = [mp.dt_tot for mp in mp_lst]
+        dt_tot = max(dt_tot_lst)
+        idx = dt_tot_lst.index(min(dt_tot_lst))
+        mp = mp_lst[idx]  # motion profile with the shortest `dt_tot` (can be 0).
+        if 0.0 not in dt_tot_lst:
+            # Note: if one of the axes has `dt_tot` equal to zero, we have
+            # single-axis motion -> no synchronisation needed.
+
+            # Find top velocity of `mp` so that its `dt_tot` becomes equal to the
+            # maximum `dt_tot`.
+            def fn(v: float) -> float:
+                mp.v_top = v
+                dev = dt_tot - mp.dt_tot
+                return dev
+
+            sol = root_scalar(fn, bracket=[1.e-6, mp.v_top])
+            mp.v_top = sol.root
+        else:
+            # Pass the travel time of the other axis also to the axis at rest so
+            # that motion profiles can be drawn correctly.
+            mp.dt_tot = dt_tot
+        return mp_x, mp_y
+    
+    def _generate_profiles(self) -> None:
+        """
+        Generates the synchronised motion profiles for the X- and Y-axis 
+        movements. The X- and Y-axis movements must start and end at the same 
+        time, regardless of the size of their displacements.
+        """
+        self._mp_x = self._create_motion_profile(
+            ds_tot=self._dtheta_x,
+            a_m=self.a_m,
+            v_m=self.v_m,
+            v_i=self._omega_xi,
+            s_i=self._theta_xi,
+            v_f=self._omega_xf
+        )
+        self._mp_y = self._create_motion_profile(
+            ds_tot=self._dtheta_y,
+            a_m=self.a_m,
+            v_m=self.v_m,
+            v_i=self._omega_yi,
+            s_i=self._theta_yi,
+            v_f=self._omega_yf
+        )
+        self._mp_x, self._mp_y = self._synchronize_profiles(self._mp_x, self._mp_y)
+
+    @property
+    def x_motion(self) -> tuple[MotionProfile, RotationDirection]:
+        """
+        Returns the motion profile and rotation direction for the X-axis 
+        movement.
+        """
+        if self._mp_x is None: self._generate_profiles()
+        return self._mp_x, self._dir_x
+
+    @property
+    def y_motion(self) -> tuple[MotionProfile, RotationDirection]:
+        """
+        Returns the motion profile and rotation direction for the Y-axis 
+        movement.
+        """
+        if self._mp_y is None: self._generate_profiles()
+        return self._mp_y, self._dir_y
+
+
+class FakeStepperMotor:
+    """
+    This class is only intended as a hack to be able to use the function 
+    `preprocess()` of class `TwoStageProfileRotator(ProfileRotator)` for 
+    calculating the time delays between successive step pulses that drive a 
+    stepper motor.
     """
     def __init__(
         self,
         full_steps_per_rev: int = 200,
         microstep_factor: int = 1
     ) -> None:
-        """Creates a `DummyStepperMotor` object with just the attributes that 
-        are  needed to generate the step pulse train (delays between step 
-        pulses).
+        """
+        Creates a `_FakeStepperMotor` object having just the attributes needed 
+        to generate the step pulse train (list of the time delays between 
+        successive step pulses).
         
         Parameters
         ----------
         full_steps_per_rev : int, optional
-            Full steps per revolution of the motor. If provided, this will 
-            override the current setting. Defaults to 200.
+            Full steps per revolution of the motor. Defaults to 200.
         microstep_factor : int
             Inverse of the microstep resolution.
         """
@@ -265,85 +237,80 @@ class _DummyStepperMotor:
         return 1.0 / self.steps_per_degree
 
 
-class Segment:
+class Segment2D:
     """
-    Represents a single, linear segment in a trajectory in the (X,Y)-plane.
+    Represents a rectilinear segment.
 
-    Given the start- and end point of the segment, the motion profile and 
-    rotation direction along the X-axis, and along the Y-axis are calculated.
-    For this, an `XYMotionController` object must be linked to the `Segment` 
-    class. See class method `set_xy_motion_control()`.
+    Given the start- and end point of the segment, the motion profile and the
+    rotation direction of the X-axis and Y-axis movement are determined.
+    For this, an `XYMotionProcessor` object must be connected to the `Segment2D` 
+    class through class method `connect_xy_motion_processor()`.
 
-    If `DummyStepperMotor` objects for the X- and Y-axis are linked to the 
-    `Segment` class, the delays between successive step pulses to drive the X- 
-    and Y-axis stepper motors, can also be calculated. Use class method 
-    `set_stepper_motors()` to link the `DummyStepperMotor` objects to the 
-    `Segment` class.
+    The step pulses to drive the X-axis and Y-axis stepper motors, can also be 
+    generated, if `FakeStepperMotor` objects are connected to the `Segment2D` 
+    class. For this, use class method `connect_stepper_motors()`.
     """
-    _xy_motion_control: XYMotionController = None
-    _x_motor: _DummyStepperMotor = None
-    _y_motor: _DummyStepperMotor = None
+    _xy_motion_proc: XYMotionProcessor = None
+    _x_motor: FakeStepperMotor = None
+    _y_motor: FakeStepperMotor = None
 
     @classmethod
-    def set_xy_motion_control(cls, xy_motion_control: XYMotionController) -> None:
-        cls._xy_motion_control = xy_motion_control
-
-    @classmethod
-    def set_stepper_motors(
+    def connect_xy_motion_processor(
         cls, 
-        x_motor: _DummyStepperMotor, 
-        y_motor: _DummyStepperMotor
+        xy_motion_processor: XYMotionProcessor
     ) -> None:
+        """
+        Connects an `XYMotionProcessor` object to the `Segment2D` class.  
+        """
+        cls._xy_motion_proc = xy_motion_processor
+
+    @classmethod
+    def connect_stepper_motors(
+        cls, 
+        x_motor: FakeStepperMotor, 
+        y_motor: FakeStepperMotor
+    ) -> None:
+        """
+        Connects `FakeStepperMotor` objects to the `Segment2D` class. 
+        """
         cls._x_motor = x_motor
         cls._y_motor = y_motor
 
     def __init__(
         self,
-        start_point: Point,
-        end_point: Point,
-        speed_ini_x: float = 0.0,
-        speed_ini_y: float = 0.0,
-        speed_fin_x: float | None = None,
-        speed_fin_y: float | None = None
+        start: TPoint,
+        end: TPoint,
+        ini_speed: tuple[float, float] = (0.0, 0.0),
+        fin_speed: tuple[float | None, float | None] = (None, None)
     ) -> None:
-        """Creates a `Segment` object.
+        """
+        Creates a `Segment2D` object.
 
         Parameters
         ----------
-        start_point: tuple[float, float]
+        start: tuple[float, float]
             Start point of the segment.
-        end_point: tuple[float, float]
+        end: tuple[float, float]
             End point of the segment.
-        speed_ini_x: float
-            Initial speed in the X-axis direction at the start point of the 
-            segment.
-        speed_ini_y: float
-            Initial speed in the Y-axis direction at the start point of the 
-            segment.
-        speed_fin_x: float
-            Final speed in the X-axis direction at the end point of the segment.
-        speed_fin_y: float
-            Final speed in the Y-axis direction at the end point of the segment.
+        ini_speed: tuple[float, float]
+            Initial velocity in the X-axis direction and in the Y-axis direction
+            at the start point of the segment.
+        fin_speed: tuple[float | None, float | None]
+            Final velocity in the X-axis direction and in the Y-axis direction 
+            at the end point of the segment.
         """
-        self.pt1 = start_point
-        self.pt2 = end_point
-
+        self.start = start
+        self.end = end
         self._mp_x, self._dir_x = None, None
         self._mp_y, self._dir_y = None, None
 
-        if self._xy_motion_control is not None:
-            # Pass start and end point and boundary velocities to `XYMotionController`
-            self._xy_motion_control.set_points(start_point, end_point)
-            self._xy_motion_control.set_boundary_velocities(
-                speed_ini_x, speed_ini_y,
-                speed_fin_x, speed_fin_y
-            )
+        if self._xy_motion_proc is not None:
+            # Generate motion profiles for the X- and Y-axis movement.
+            self._xy_motion_proc.set_segmentdata(start, end, ini_speed, fin_speed)
+            self._mp_x, self._dir_x = self._xy_motion_proc.x_motion
+            self._mp_y, self._dir_y = self._xy_motion_proc.y_motion
             
-            # Calculate motion profiles of X and Y
-            self._mp_x, self._dir_x = self._xy_motion_control.x_motion
-            self._mp_y, self._dir_y = self._xy_motion_control.y_motion
-            
-            # Calculate step pulse train to drive X and Y motor
+            # Generate step pulse trains to drive the X- and Y-axis motor.
             self._x_rotator, self._y_rotator = None, None
             if self._x_motor is not None:
                 # noinspection PyTypeChecker
@@ -355,26 +322,31 @@ class Segment:
                 self._y_rotator.preprocess(self._dir_y, self._mp_y)
 
     @property
-    def x_motion(self) -> tuple[MotionProfile, Direction] | None:
-        """Returns the segment's absolute motion profile and rotation direction 
-        along the X-axis.
+    def x_motion(self) -> tuple[MotionProfile, RotationDirection] | None:
         """
-        if self._xy_motion_control is not None:
+        Returns the motion profile and rotation direction of the X-axis 
+        movement.
+        """
+        if self._xy_motion_proc is not None:
             return self._mp_x, self._dir_x
         return None
 
     @property
-    def y_motion(self) -> tuple[MotionProfile, Direction] | None:
-        """Returns the segment's absolute motion profile and rotation direction 
-        along the Y-axis.
+    def y_motion(self) -> tuple[MotionProfile, RotationDirection] | None:
         """
-        if self._xy_motion_control is not None:
+        Returns the motion profile and rotation direction of the Y-axis 
+        movement.
+        """
+        if self._xy_motion_proc is not None:
             return self._mp_y, self._dir_y
         return None
 
     @property
     def x_delays(self) -> list[float] | None:
-        """Returns the list of delays between pulses to drive the X-axis motor."""
+        """
+        Returns the step pulse train (list of time delays between successive 
+        pulses) to drive the X-axis stepper motor.
+        """
         if self._x_rotator is not None:
             # noinspection PyProtectedMember
             return self._x_rotator._delays
@@ -382,53 +354,42 @@ class Segment:
 
     @property
     def y_delays(self) -> list[float] | None:
-        """Returns the list of delays between pulses to drive the Y-axis motor."""
+        """
+        Returns the step pulse train (list of time delays between successive 
+        pulses) to drive the Y-axis stepper motor.
+        """
         if self._y_rotator is not None:
             # noinspection PyProtectedMember
             return self._y_rotator._delays
         return None
     
     @property
-    def x_direction(self) -> Direction:
-        """Returns the rotation direction of the X-axis motor."""
+    def x_direction(self) -> RotationDirection:
+        """
+        Returns the rotation direction of the X-axis motor.
+        """
         return self._dir_x
 
     @property
-    def y_direction(self) -> Direction:
-        """Returns the rotation direction of the Y-axis motor."""
+    def y_direction(self) -> RotationDirection:
+        """
+        Returns the rotation direction of the Y-axis motor.
+        """
         return self._dir_y
-    
-    @property
-    def final_speed_x(self) -> float | None:
-        """Returns the x-component of the final speed at the end point of the
-        segment.
-        """
-        if self._mp_x is not None:
-            return self._mp_x.v_fin
-        return None
-    
-    @property
-    def final_speed_y(self) -> float | None:
-        """Returns the y-component of the final speed at the end point of the
-        segment.
-        """
-        if self._mp_y is not None:
-            return self._mp_y.v_fin
-        return None
-    
+       
     @property
     def position_profiles(self) -> tuple | None:
         """
-        Returns the position profiles along the X-axis and the Y-axis, taking
-        account of the rotation direction of the X-axis and Y-axis motors.
+        Returns the position profile of the X-axis and Y-axis movement, taking
+        the rotation direction into account.
         
-        A position profile is a tuple of two arrays, the time values and the
+        Each position profile is a tuple of two arrays: the time values and the
         corresponding position values.
         """
-        if self._xy_motion_control is not None:
+        if self._xy_motion_proc is not None:
             tx_arr, thetax_arr = self._mp_x.position_profile()
-            x_arr = thetax_arr / self._xy_motion_control._N
-            if self._dir_x == Direction.CLOCKWISE:
+            x_arr = thetax_arr / self._xy_motion_proc._N
+            if self._dir_x == RotationDirection.CLOCKWISE:
                 x0 = x_arr[0]
                 dx_arr = x_arr - x0
                 x0_arr = np.full_like(x_arr, x0)
@@ -436,8 +397,8 @@ class Segment:
             pos_x = (tx_arr, x_arr)
             
             ty_arr, thetay_arr = self._mp_y.position_profile()
-            y_arr = thetay_arr / self._xy_motion_control._N
-            if self._dir_y == Direction.CLOCKWISE:
+            y_arr = thetay_arr / self._xy_motion_proc._N
+            if self._dir_y == RotationDirection.CLOCKWISE:
                 y0 = y_arr[0]
                 dy_arr = y_arr - y0
                 y0_arr = np.full_like(y_arr, y0)
@@ -450,24 +411,23 @@ class Segment:
     @property
     def velocity_profiles(self) -> tuple | None:
         """
-        Returns the velocity profiles along the X-axis and the Y-axis, taking
-        account of the rotation direction of the X-axis and Y-axis motors.
-        Counterclockwise velocities are positive, while clockwise velocities are
-        negative.
+        Returns the velocity profile of the X-axis and Y-axis movement, taking
+        the rotation direction into account. Counterclockwise velocities are 
+        considered positive, while clockwise velocities are negative.
         
-        A velocity profile is a tuple of two arrays, the time values and the
+        Each velocity profile is a tuple of two arrays: the time values and the
         corresponding velocity values.
         """
-        if self._xy_motion_control is not None:
+        if self._xy_motion_proc is not None:
             tx_arr, omegax_arr = self._mp_x.velocity_profile()
-            vx_arr = omegax_arr / self._xy_motion_control._N
-            if self._dir_x == Direction.CLOCKWISE:
+            vx_arr = omegax_arr / self._xy_motion_proc._N
+            if self._dir_x == RotationDirection.CLOCKWISE:
                 vx_arr *= -1.0
             vel_x = (tx_arr, vx_arr)
             
             ty_arr, omegay_arr = self._mp_y.velocity_profile()
-            vy_arr = omegay_arr / self._xy_motion_control._N
-            if self._dir_y == Direction.CLOCKWISE:
+            vy_arr = omegay_arr / self._xy_motion_proc._N
+            if self._dir_y == RotationDirection.CLOCKWISE:
                 vy_arr *= -1.0
             vel_y = (ty_arr, vy_arr)
             
@@ -477,57 +437,180 @@ class Segment:
     @property
     def acceleration_profiles(self) -> tuple | None:
         """
-        Returns the acceleration profiles along the X-axis and the Y-axis.
+        Returns the acceleration profile of the X-axis and Y-axis movement.
         
-        An acceleration profile is a tuple of two arrays, the time values and 
+        Each acceleration profile is a tuple of two arrays: the time values and 
         the corresponding acceleration values.
         """
-        if self._xy_motion_control is not None:
+        if self._xy_motion_proc is not None:
             tx_arr, alphax_arr = self._mp_x.acceleration_profile()
-            ax_arr = alphax_arr / self._xy_motion_control._N
+            ax_arr = alphax_arr / self._xy_motion_proc._N
             acc_x = (tx_arr, ax_arr)
+            
             ty_arr, alphay_arr = self._mp_y.acceleration_profile()
-            ay_arr = alphay_arr / self._xy_motion_control._N
+            ay_arr = alphay_arr / self._xy_motion_proc._N
             acc_y = (ty_arr, ay_arr)
+            
             return acc_x, acc_y
         return None
 
     
-class Trajectory(list[Segment]):
-    """A `Trajectory` object is a list of `Segment` objects."""
+class Trajectory2D(list[Segment2D]):
+    """
+    Represents a 2D trajectory in the XY-plane. A `Trajectory2D` object is a
+    list of `Segment2D` objects.
+    """
+    def _connect_segments(self):
+        """
+        Connects the motion profiles of the successive segments in the 
+        trajectory.
+        """
+        def _connect_vel(*segments: Segment2D):
+            """Connects the velocity profiles."""
+            vel_x_lst, vel_y_lst = zip(*[
+                segment.velocity_profiles 
+                for segment in segments
+            ])
+            vel_x_connected = _connect(*vel_x_lst)
+            vel_y_connected = _connect(*vel_y_lst)
+            return vel_x_connected, vel_y_connected
+
+        def _connect_pos(*segments: Segment2D):
+            """Connects the position profiles."""
+            pos_x_lst, pos_y_lst = zip(*[
+                segment.position_profiles 
+                for segment in segments
+            ])
+            pos_x_connected = _connect(*pos_x_lst)
+            pos_y_connected = _connect(*pos_y_lst)
+            return pos_x_connected, pos_y_connected
+
+        def _connect_acc(*segments: Segment2D):
+            """Connects the acceleration profiles."""
+            acc_x_lst, acc_y_lst = zip(*[
+                segment.acceleration_profiles 
+                for segment in segments
+            ])
+            acc_x_connected = _connect(*acc_x_lst)
+            acc_y_connected = _connect(*acc_y_lst)
+            return acc_x_connected, acc_y_connected
+
+        def _connect(*profiles):
+            """Connects the profiles (either position, velocity, or 
+            acceleration) of all segments in the trajectory.
+            """
+            t_arr_lst, arr_lst = [], []
+            for i, profile in enumerate(profiles):
+                t_arr, arr = profile
+                if i > 0:
+                    dt_shift = t_arr_lst[-1][-1]
+                    t_arr += dt_shift
+                t_arr_lst.append(t_arr)
+                arr_lst.append(arr)
+            t_arr_concat = np.concatenate(tuple(t_arr_lst))
+            arr_concat = np.concatenate(tuple(arr_lst))
+            return t_arr_concat, arr_concat
+                
+        pos_profile = _connect_pos(*self)
+        pos_profile = {
+            "x": {
+                "time": pos_profile[0][0],
+                "values": pos_profile[0][1]
+            },
+            "y": {
+                "time": pos_profile[1][0],
+                "values": pos_profile[1][1]
+            }
+        }
+
+        vel_profile = _connect_vel(*self)
+        vel_profile = {
+            "x": {
+                "time": vel_profile[0][0],
+                "values": vel_profile[0][1]
+            },
+            "y": {
+                "time": vel_profile[1][0],
+                "values": vel_profile[1][1]
+            }
+        }
+        
+        acc_profile = _connect_acc(*self)
+        acc_profile = {
+            "x": {
+                "time": acc_profile[0][0],
+                "values": acc_profile[0][1]
+            },
+            "y": {
+                "time": acc_profile[1][0],
+                "values": acc_profile[1][1]
+            }
+        }
+        return pos_profile, vel_profile, acc_profile
     
     @property
     def motion_profiles(self) -> tuple[dict[str, Any], ...] | None:
-        """Returns the connected position profiles, velocity profiles, 
-        and acceleration profiles of the segments that constitute the 
-        trajectory.
+        """
+        Returns the connected position, velocity, and acceleration profiles of 
+        the segments in the trajectory.
+        
+        Returns
+        -------
+        pos_profile : dict[str, float]
+            Connected position profile of the trajectory.
+        vel_profile : dict[str, float]
+            Connected velocity profile of the trajectory.
+        acc_profile : dict[str, float]
+            Connected acceleration profile of the trajectory.
+
+        The dictionaries all have the same structure:
+        ```
+        <profile> = {
+            "x": {
+                "time": <array of time values>,
+                "values": <array of corresponding profile values>
+            },
+            "y": {
+                "time": <array of time values>,
+                "values": <array of corresponding profile values>
+            }
+        }
+        ```
         """
         if len(self) > 0:
-            from .utils import connect
-            # noinspection PyTupleAssignmentBalance
-            pos, vel, acc = connect(*self)
+            pos, vel, acc = self._connect_segments()
             return pos, vel, acc
         return None
 
 
-class TrajectoryPlanner:
-    """Creates a `Trajectory` object from a sequence of line segments. 
+@dataclass
+class Segment2DData:
+    """
+    An intermediate data class used by class `Trajectory2DPlanner` for 
+    temporarily holding data about the segements while planning the trajectory.
+    """
+    segment: TSegment
+    dtheta_x: float
+    dtheta_y: float
+    v_xi: float | None = None
+    v_xf: float | None = None 
+    v_yi: float | None = None
+    v_yf: float | None = None
+
+
+class Trajectory2DPlanner:
+    """
+    Creates a `Trajectory2D` object. 
+
+    A `Trajectory2D` object is a list of `Segment2D` objects. A `Segment2D` 
+    object contains the motion profiles of the X-axis and Y-axis movement. It 
+    can also contain the step pulse trains (lists of time delays between 
+    successive step pulses) for driving the X-axis and Y-axis stepper motors. 
     
-    A line segment is represented by a simple two-element tuple containing the 
-    start and end point of the segment. Start and end point are also a 
-    two-element tuples with the x- and y-coordinate of the point.
-    
-    A `Trajectory` object is a list of `Segment` objects. A `Segment` object
-    contains the motion profiles of the X-axis and the Y-axis movement. It also 
-    contains the lists of step pulse delays to drive the X-axis and Y-axis 
-    stepper motors. 
-    
-    Based on the passed sequence of line segments, the `TrajectoryPlanner` 
-    first determines the boundary velocities of the segments (the x- and 
-    y-components of the initial velocity at the start point of each segment and 
-    of the final velocity at the end point of each segment). Then each segment 
-    in the passed sequence can be transformed into a fully fledged `Segment` 
-    object (using the `XYMotionController` object inside the `Segment` object).
+    The `Trajectory2DPlanner` determines the boundary velocities of the segments
+    (the X- and Y-components of the velocity at the start point and at the end 
+    point of each segment). Subsequently, all segments are transformed into 
+    fully fledged `Segment2D` objects held inside a Trajectory2D` object.
     """
     def __init__(
         self,
@@ -536,9 +619,10 @@ class TrajectoryPlanner:
         motor_accel: float,
         full_steps_per_rev: int = 200,
         microstep_factor: int = 1,
-        profile_type: ProfileType = ProfileType.TRAPEZOIDAL,
+        profile_type: MotionProfileType = MotionProfileType.S_CURVED,
     ) -> None:
-        """Initializes a `TrajectoryPlanner` object.
+        """
+        Initializes a `Trajectory2DPlanner` object.
         
         Parameters
         ----------
@@ -559,79 +643,168 @@ class TrajectoryPlanner:
             Defaults to 1, which means full step mode (no microstepping). If, 
             for example, the desired microstep resolution should be 1/16, set
             `microstep_factor` to 16.
-        profile_type : ProfileType
+        profile_type : MotionProfileType
             The type of motion profile. Either a trapezoidal (default) or 
             S-curved motion profile.
         
         Notes
         -----
-        It is assumed that the lead screws of X- and Y-axis and the X- and 
-        Y-axis stepper motor are both identical.
+        Assumption is made that the lead screws of the X- and Y-axis and also 
+        the X- and Y-axis stepper motor are both identical.
         """
-        # Initialize class attributes of `Segment` class.
-        xy_motion_control = XYMotionController(pitch, motor_speed, motor_accel, profile_type)
-        x_motor = _DummyStepperMotor(full_steps_per_rev, microstep_factor)
-        y_motor = _DummyStepperMotor(full_steps_per_rev, microstep_factor)
-        Segment.set_xy_motion_control(xy_motion_control)
-        Segment.set_stepper_motors(x_motor, y_motor)
+        self.pitch = pitch
+        self.v_m = motor_speed
+        self.a_m = motor_accel
+        self._profile_type = SCurvedProfile
+        if profile_type == MotionProfileType.TRAPEZOIDAL:
+            self._profile_type = TrapezoidalProfile
+        
+        # Connect `XYMotionProcessor` object to the `Segment2D` class.
+        xy_motion_processor = XYMotionProcessor(pitch, motor_speed, motor_accel, profile_type)
+        Segment2D.connect_xy_motion_processor(xy_motion_processor)
+        
+        # Connect `FakeStepperMotor` objects to the `Segment2D` class.
+        x_motor = FakeStepperMotor(full_steps_per_rev, microstep_factor)
+        y_motor = FakeStepperMotor(full_steps_per_rev, microstep_factor)
+        Segment2D.connect_stepper_motors(x_motor, y_motor)
+
+    def _minimize_profile_time(self, ds_tot: float, v_other: float, find: str) -> float:
+        def fn(v: float) -> float:
+            try:
+                kwargs = {"v_i": v, "v_f": v_other} if find == "v_i" else {"v_i": v_other, "v_f": v}
+                mp = self._profile_type(ds_tot=ds_tot, a_m=self.a_m, v_m=self.v_m, **kwargs)
+                return mp.dt_tot
+            except ValueError:
+                return float("inf")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            max_speed = min(self.v_m, np.sqrt(2 * self.a_m * ds_tot))
+            r = minimize_scalar(fn, bounds=(1.e-6, max_speed), method="bounded")
+        if r.success:
+            return float(r.x)
+        raise ValueError(f"{find} could not be determined")
     
-    @staticmethod
-    def create_trajectory(*points: Point) -> Trajectory:
-        """Creates a `Trajectory` object from a sequence of segments. A segment 
-        is represented as a two-element tuple containing the start and end point
-        of the line segment. A point is also a two-element tuple with the x- and
-        y-coordinate of the point.
-        """
-        # Create a new `Trajectory` object.
-        trajectory = Trajectory()
-        
-        # Create segments by grouping the points in pairs
-        start_points = points[:-1]
-        end_points = points[1:]
-        segments = [(sp, ep) for sp, ep in zip(start_points, end_points)]
-        
-        # Create `Segment` objects and append them to the `Trajectory` object.
-        speed_ini_x = 0.0
-        speed_ini_y = 0.0
+    def _get_angular_displacements(self, segment: TSegment) -> tuple[float, float]:
+        xi = segment[0][0]
+        yi = segment[0][1]
+        xf = segment[1][0]
+        yf = segment[1][1]
+        dx = xf - xi
+        dy = yf - yi
+        dtheta_x = round(360.0 * self.pitch * dx, 6)
+        dtheta_y = round(360.0 * self.pitch * dy, 6)
+        return dtheta_x, dtheta_y
+
+    def _create_segmentdata(self, pts: list[TPoint]) -> list[Segment2DData]:
+        segments = list(zip(pts[:-1], pts[1:]))
         i_max = len(segments) - 1
-        for i, seg in enumerate(segments):
-            # Determine final velocity in x and y at the end point of the 
-            # segment to be created.
+        segmentdata_lst = []
+        for i, segment in enumerate(segments):
+            dtheta_x, dtheta_y = self._get_angular_displacements(segment)
+            segmentdata = Segment2DData(segment, dtheta_x, dtheta_y)
+            if i == 0:
+                segmentdata.v_xi = 0.0
+                segmentdata.v_yi = 0.0
+            if i == i_max:
+                segmentdata.v_xf = 0.0
+                segmentdata.v_yf = 0.0
+            segmentdata_lst.append(segmentdata)
+        return segmentdata_lst
+
+    def _analyze_segmentdata(self, segmentdata_lst: list[Segment2DData]) -> None:
+        i_max = len(segmentdata_lst) - 1
+        
+        i = 0
+        for segmentdata1 in segmentdata_lst:
             if i < i_max:
-                next_seg = segments[i + 1]
-                next_dx = round(next_seg[1][0] - next_seg[0][0], 6)
-                next_dy = round(next_seg[1][1] - next_seg[0][1], 6)
-                if next_dx == 0.0:
-                    speed_fin_x = 0.0
-                else:
-                    speed_fin_x = None
-                if next_dy == 0.0:
-                    speed_fin_y = 0.0
-                else:
-                    speed_fin_y = None
-            else:  # i == i_max
-                speed_fin_x = 0.0
-                speed_fin_y = 0.0
-            
-            # Create `Segment` object and append it to the `trajectory` ->
-            # this also calculates the motion profiles in x and y of the segment
-            # and the step pulse train in x and y to drive the stepper motors.
-            segment = Segment(
-                start_point=seg[0],
-                end_point=seg[1],
-                speed_ini_x=speed_ini_x,
-                speed_ini_y=speed_ini_y,
-                speed_fin_x=speed_fin_x,
-                speed_fin_y=speed_fin_y
-            )
-            trajectory.append(segment)
-            
-            # Get the calculated final velocity in x and y at the end point of
-            # the current `Segment` object. This will be the initial velocity of
-            # the next `Segment` object.
-            mp_x, dir_x = segment.x_motion
-            mp_y, dir_y = segment.y_motion
-            speed_ini_x = mp_x.v_fin
-            speed_ini_y = mp_y.v_fin
+                segmentdata2 = segmentdata_lst[i + 1]
+                dtheta_x1 = segmentdata1.dtheta_x
+                dtheta_x2 = segmentdata2.dtheta_x
+                if dtheta_x1 == 0.0:
+                    segmentdata1.v_xi = 0.0
+                    segmentdata1.v_xf = 0.0
+                    segmentdata2.v_xi = 0.0
+                if dtheta_x2 == 0.0 or dtheta_x1 * dtheta_x2 < 0.0:
+                    segmentdata1.v_xf = 0.0
+                    segmentdata2.v_xi = 0.0
+
+                dtheta_y1 = segmentdata1.dtheta_y
+                dtheta_y2 = segmentdata2.dtheta_y
+                if dtheta_y1 == 0.0:
+                    segmentdata1.v_yi = 0.0
+                    segmentdata1.v_yf = 0.0
+                    segmentdata2.v_yi = 0.0
+                if dtheta_y2 == 0.0 or dtheta_y1 * dtheta_y2 < 0.0:
+                    segmentdata1.v_yf = 0.0
+                    segmentdata2.v_yi = 0.0
+
+            i += 1
+        
+        i = i_max
+        for segmentdata2 in reversed(segmentdata_lst):
+            if i > 0:
+                segmentdata1 = segmentdata_lst[i - 1]
+
+                if segmentdata2.v_xi is None:
+                    segmentdata2.v_xi = self._minimize_profile_time(
+                        ds_tot=segmentdata2.dtheta_x,
+                        v_other=segmentdata2.v_xf,
+                        find="v_i"
+                    )
+                    segmentdata1.v_xf = segmentdata2.v_xi
+
+                if segmentdata2.v_yi is None:
+                    segmentdata2.v_yi = self._minimize_profile_time(
+                        ds_tot=segmentdata2.dtheta_y,
+                        v_other=segmentdata2.v_yf,
+                        find="v_i"
+                    )
+                    segmentdata1.v_yf = segmentdata2.v_yi
+            i -= 1
+        
+        i = 0
+        for segmentdata1 in segmentdata_lst:
+            if i < i_max:
+                segmentdata2 = segmentdata_lst[i + 1]
+
+                if segmentdata1.v_xf > 0.0:
+                    v_xf = self._minimize_profile_time(
+                        ds_tot=segmentdata1.dtheta_x,
+                        v_other=segmentdata1.v_xi,
+                        find="v_f"
+                    )
+                    v_xf = min(segmentdata1.v_xf, v_xf)
+                    segmentdata1.v_xf = v_xf
+                    segmentdata2.v_xi = v_xf
+
+                if segmentdata1.v_yf > 0.0:
+                    v_yf = self._minimize_profile_time(
+                        ds_tot=segmentdata1.dtheta_y,
+                        v_other=segmentdata1.v_yi,
+                        find="v_f"
+                    )
+                    v_yf = min(segmentdata1.v_yf, v_yf)
+                    segmentdata1.v_yf = v_yf
+                    segmentdata2.v_yi = v_yf
+            i += 1
     
+    def get_trajectory(self, *points: TPoint) -> Trajectory2D:
+        """
+        Creates a `Trajectory2D` object from a sequence of points. 
+        
+        A point is specified by a two-element tuple containing the X- and 
+        Y-coordinate of that point.
+        """
+        trajectory = Trajectory2D()
+        segmentdata_lst = self._create_segmentdata(list(points))
+        self._analyze_segmentdata(segmentdata_lst)
+        for segment_data in segmentdata_lst:
+            segment_obj = Segment2D(
+                start=segment_data.segment[0],
+                end=segment_data.segment[1],
+                ini_speed=(segment_data.v_xi, segment_data.v_yi),
+                fin_speed=(segment_data.v_xf, segment_data.v_yf)
+            )
+            trajectory.append(segment_obj)
         return trajectory

@@ -1,4 +1,4 @@
-from .motion_profile import MotionProfile
+from .multi_axis import MotionProfile
 
 
 class DynamicDelayGenerator:
@@ -32,7 +32,7 @@ class DynamicDelayGenerator:
         self._decel_fn_t_from_s = None
 
         self.phase = "accel"
-        self.cruise_velocity = self._accel_fn_v_from_t(self.profile.dt_ini)
+        self.cruise_velocity = self._accel_fn_v_from_t(self.profile.dt_i)
         self._stop_velocity_threshold = 1e-3
 
     def trigger_decel(self):
@@ -52,7 +52,7 @@ class DynamicDelayGenerator:
 
         if self.phase == "accel":
             t_new = self._accel_fn_t_from_s(target_s)
-            if t_new >= self.profile.dt_ini:
+            if t_new >= self.profile.dt_i:
                 self.phase = "cruise"
                 t_new = self.t + self.step_angle / self.cruise_velocity
                 

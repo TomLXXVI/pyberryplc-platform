@@ -8,7 +8,7 @@ import threading
 from collections import deque
 
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
-from pyberryplc.motion.motion_profile import MotionProfile, Direction
+from pyberryplc.motion.multi_axis import MotionProfile, RotationDirection
 from pyberryplc.motion.dynamic_generator import DynamicDelayGenerator
 
 
@@ -22,17 +22,17 @@ class Rotator(ABC):
     def __init__(self, motor: 'StepperMotor') -> None:
         self.motor = motor
         self._step_width = 20e-6  # default step pulse width in seconds
-        self._direction: Direction = Direction.COUNTERCLOCKWISE
+        self._direction: RotationDirection = RotationDirection.COUNTERCLOCKWISE
         self._busy = False
         self._start_time: float = 0.0
         self._end_time: float = 0.0
     
     @property
-    def direction(self) -> Direction:
+    def direction(self) -> RotationDirection:
         return self._direction
 
     @direction.setter
-    def direction(self, value: Direction) -> None:
+    def direction(self, value: RotationDirection) -> None:
         """
         Sets the rotation direction in which the stepper motor should rotate.
         Either Direction.CLOCKWISE or Direction.COUNTERCLOCKWISE.
@@ -236,7 +236,10 @@ class ProfileRotator(Rotator):
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
-        angles = [self._motion_profile.s_ini + i * step_angle for i in range(num_steps + 1)]
+        try:
+            angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
+        except AttributeError:
+            angles = [i * step_angle for i in range(num_steps + 1)]
         times = list(map(self._motion_profile.get_time_position_fn(), angles))
         delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
         self._delays = delays
@@ -285,7 +288,10 @@ class ProfileRotatorThreaded(NonBlockingRotator):
         step_angle = self.motor.step_angle
         final_angle = self._motion_profile.ds_tot + step_angle
         num_steps = int(final_angle / step_angle)
-        angles = [self._motion_profile.s_ini + i * step_angle for i in range(num_steps + 1)]
+        try:
+            angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
+        except AttributeError:
+            angles = [i * step_angle for i in range(num_steps + 1)]
         times = list(map(self._motion_profile.get_time_position_fn(), angles))
         delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
         self._queue = deque(delays)

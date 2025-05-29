@@ -13,7 +13,7 @@ from pyberryplc.stepper import (
     PinConfig,
     TMC2208UART,
     RotatorType,
-    Direction
+    RotationDirection
 )
 from pyberryplc.motion.single_axis import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
@@ -81,7 +81,7 @@ class StepperDynamicPLC(AbstractPLC):
     def _execute_actions(self):
         if self.X1.rising_edge:
             self.logger.info("Stepper starts moving.")
-            self.stepper.rotator.direction = Direction.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
             self.stepper.rotator.start()
         
         if self.X2.rising_edge:

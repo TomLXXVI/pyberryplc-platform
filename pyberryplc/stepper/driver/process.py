@@ -3,8 +3,8 @@ import multiprocessing
 # noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 
-from pyberryplc.motion.motion_profile import MotionProfile
-from .base import StepperMotor, ProfileRotator, Direction
+from pyberryplc.motion.multi_axis import MotionProfile
+from .base import StepperMotor, ProfileRotator, RotationDirection
 
 
 TStepperMotor = TypeVar("TStepperMotor", bound=StepperMotor)
@@ -16,7 +16,11 @@ class TwoStageProfileRotator(ProfileRotator):
     profile and the commanding of a rotation movement into two separate 
     functions.
     """
-    def preprocess(self, direction: Direction, profile: MotionProfile) -> None:
+    def preprocess(
+        self, 
+        direction: RotationDirection, 
+        profile: MotionProfile
+    ) -> None:
         """
         Calculates the delays between successive step pulses that drive the 
         stepper motor from the given motion profile..
@@ -132,9 +136,9 @@ class MotionProfileProcess(multiprocessing.Process):
                 profile: MotionProfile = msg["profile"]
                 direction: str = msg.get("direction", "forward")
                 if direction == "forward":
-                    motor.rotator.preprocess(Direction.COUNTERCLOCKWISE, profile)
+                    motor.rotator.preprocess(RotationDirection.COUNTERCLOCKWISE, profile)
                 else:
-                    motor.rotator.preprocess(Direction.CLOCKWISE, profile)
+                    motor.rotator.preprocess(RotationDirection.CLOCKWISE, profile)
                 self.conn.send({
                     "status": "ready", 
                     "name": self.name
@@ -235,7 +239,7 @@ class TrajectoryProcess(multiprocessing.Process):
 
             if cmd == "start_segment":
                 motor.rotator.delays = msg.get("delays", None)
-                motor.rotator.direction = msg.get("direction", Direction.COUNTERCLOCKWISE)
+                motor.rotator.direction = msg.get("direction", RotationDirection.COUNTERCLOCKWISE)
                 if motor.rotator.delays is not None:
                     motor.rotator.rotate()
                     self.conn.send({

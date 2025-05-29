@@ -5,7 +5,7 @@ from pyberryplc.stepper import (
     TMC2208UART,
     PinConfig,
     RotatorType,
-    Direction
+    RotationDirection
 )
 from pyberryplc.motion.single_axis import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
@@ -30,11 +30,11 @@ class StepperUARTTestPLC(AbstractPLC):
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
         self.stepper.attach_rotator(RotatorType.PROFILE_THREADED)
-        self.stepper.direction = Direction.COUNTERCLOCKWISE
+        self.stepper.direction = RotationDirection.COUNTERCLOCKWISE
         self.stepper.rotator.profile = TrapezoidalProfile(
             ds_tot=180,
             dt_tot=1,
-            dt_ini=0.25
+            dt_i=0.25
         )
 
         self.X0 = self.add_marker("X0")
@@ -83,12 +83,12 @@ class StepperUARTTestPLC(AbstractPLC):
             self.logger.info("Press 's' to start motor")
 
         if self.X1.rising_edge:
-            self.stepper.rotator.direction = Direction.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
             self.stepper.rotator.start()
             self.logger.info("Press 'r' to start motor in reverse")
 
         if self.X2.rising_edge:
-            self.stepper.rotator.direction = Direction.CLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CLOCKWISE
             self.stepper.rotator.start()
             self.logger.info("Press 'q' to go back to idle")
 

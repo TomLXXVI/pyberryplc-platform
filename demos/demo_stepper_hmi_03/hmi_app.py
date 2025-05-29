@@ -3,8 +3,8 @@ import math
 from pyberryplc.hmi import AbstractHMI, ErrorDialog
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.motion_profile import MotionProfile, ProfileType
-from pyberryplc.motion.trajectory import XYMotionController
+from pyberryplc.motion.multi_axis import MotionProfile, MotionProfileType
+from pyberryplc.motion.trajectory import XYMotionProcessor
 
 from plc_app import XYMotionPLC
 
@@ -18,13 +18,12 @@ def xy_motion_control(
     profile_type: str
 ) -> tuple[MotionProfile, MotionProfile]:
     profile_type = (
-        ProfileType.TRAPEZOIDAL 
-        if profile_type == ProfileType.TRAPEZOIDAL 
-        else ProfileType.S_CURVED
+        MotionProfileType.TRAPEZOIDAL 
+        if profile_type == MotionProfileType.TRAPEZOIDAL 
+        else MotionProfileType.S_CURVED
     )
-    controller = XYMotionController(pitch, omega, alpha, profile_type)
-    controller.set_points(p1, p2)
-    controller.set_boundary_velocities(speed_fin_x=0.0, speed_fin_y=0.0)
+    controller = XYMotionProcessor(pitch, omega, alpha, profile_type)
+    controller.set_segmentdata(p1, p2, initial_speed=(0.0, 0.0), final_speed=(0.0, 0.0))
     mp_x, _ = controller.x_motion
     mp_y, _ = controller.y_motion
     return mp_x, mp_y

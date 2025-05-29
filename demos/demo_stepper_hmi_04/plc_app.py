@@ -1,7 +1,7 @@
 from typing import Callable, Type, Any, TypeVar
 from logging import Logger
 from pyberryplc.core import AbstractPLC, SharedData, CounterUp
-from pyberryplc.motion.trajectory import Trajectory
+from pyberryplc.motion.trajectory import Trajectory2D
 
 from pyberryplc.stepper import (
     StepperMotor,
@@ -113,8 +113,8 @@ class XYMotionPLC(AbstractPLC):
     
     def __init__(self, shared_data: SharedData, logger: Logger):
         super().__init__(shared_data=shared_data, logger=logger)
-        self.trajectory: Trajectory | None = None
-              
+        self.trajectory: Trajectory2D | None = None
+
         # Internal markers
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")

@@ -30,7 +30,7 @@ class StepperHMI(AbstractHMI):
         self.motion_profile = TrapezoidalProfile(
             ds_tot=720.0,
             dt_tot=2.0,
-            dt_ini=0.5
+            dt_i=0.5
         )
         
         # Figure of initial motion profile.
@@ -73,7 +73,7 @@ class StepperHMI(AbstractHMI):
                 )
                 self.dt_acc_input = self.ui.number(
                     label="Acceleration time [s]",
-                    value=self.motion_profile.dt_ini,
+                    value=self.motion_profile.dt_i,
                     on_change=self._update_plot
                 )
                 self.profile_type = self.ui.select(
@@ -120,7 +120,7 @@ class StepperHMI(AbstractHMI):
             profile_params = {
                 'ds_tot': ds_tot,
                 'dt_tot': dt_tot,
-                'dt_ini': dt_acc
+                'dt_i': dt_acc
             }
             self.motion_profile = None
             match self.profile_type.value:

@@ -7,7 +7,7 @@ from pyberryplc.stepper.driver.base import (
     PinConfig,
     MicrostepPinConfig,
     MicrostepConfig,
-    Direction,
+    RotationDirection,
     RotatorType
 )
 from pyberryplc.stepper.driver.a4988 import A4988StepperMotor
@@ -20,7 +20,7 @@ __all__ = [
     "PinConfig",
     "MicrostepPinConfig",
     "MicrostepConfig",
-    "Direction",
+    "RotationDirection",
     "RotatorType",
     "A4988StepperMotor",
     "TMC2208StepperMotor",
