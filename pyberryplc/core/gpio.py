@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 
 from gpiozero.pins.pigpio import PiGPIOFactory, PiFactory
 from gpiozero import DigitalInputDevice, DigitalOutputDevice, PWMOutputDevice
-
 import pigpio
 
 

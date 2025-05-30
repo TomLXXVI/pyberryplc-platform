@@ -233,17 +233,20 @@ class ProfileRotator(Rotator):
         self._motion_profile = value
     
     def _generate_delays(self) -> None:
-        step_angle = self.motor.step_angle
-        final_angle = self._motion_profile.ds_tot + step_angle
-        num_steps = int(final_angle / step_angle)
-        try:
-            angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
-        except AttributeError:
-            angles = [i * step_angle for i in range(num_steps + 1)]
-        times = list(map(self._motion_profile.get_time_position_fn(), angles))
-        delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
-        self._delays = delays
-        
+        if self._motion_profile.ds_tot > 0.0:
+            step_angle = self.motor.step_angle
+            final_angle = self._motion_profile.ds_tot + step_angle
+            num_steps = int(final_angle / step_angle)
+            try:
+                angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
+            except AttributeError:
+                angles = [i * step_angle for i in range(num_steps + 1)]
+            times = list(map(self._motion_profile.get_time_position_fn(), angles))
+            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
+            self._delays = delays
+        else:
+            self._delays = []
+    
     def _step_loop(self) -> None:
         self._busy = True
         self._write_direction()
@@ -285,16 +288,19 @@ class ProfileRotatorThreaded(NonBlockingRotator):
         self._motion_profile = value
 
     def _generate_delays(self) -> None:
-        step_angle = self.motor.step_angle
-        final_angle = self._motion_profile.ds_tot + step_angle
-        num_steps = int(final_angle / step_angle)
-        try:
-            angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
-        except AttributeError:
-            angles = [i * step_angle for i in range(num_steps + 1)]
-        times = list(map(self._motion_profile.get_time_position_fn(), angles))
-        delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
-        self._queue = deque(delays)
+        if self._motion_profile.ds_tot > 0.0:
+            step_angle = self.motor.step_angle
+            final_angle = self._motion_profile.ds_tot + step_angle
+            num_steps = int(final_angle / step_angle)
+            try:
+                angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
+            except AttributeError:
+                angles = [i * step_angle for i in range(num_steps + 1)]
+            times = list(map(self._motion_profile.get_time_position_fn(), angles))
+            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
+            self._queue = deque(delays)
+        else:
+            self._queue = deque()
 
     def _step_loop(self) -> None:
         self._busy = True

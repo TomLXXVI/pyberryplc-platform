@@ -9,9 +9,9 @@
 **PyBerryPLC is a Python-based platform for programmable logic controller (PLC) applications using the Raspberry Pi.**
 
 With PyBerryPLC, PLC programs are written entirely in Python. Beyond classic PLC functionality, the platform enables you
-to control stepper motors via A4988 or TMC2208 drivers. You can define motion profiles—trapezoidal or S-curve—for 
-single-axis movement, or synchronize two stepper motors for planar (XY) motion. Additionally, PLC programs can be 
-extended with a web-based Human Machine Interface (HMI) built using NiceGui.
+to control stepper motors via A4988 or TMC2208 drivers. You can define motion profiles —trapezoidal or S-curve— and also
+synchronize either two or three stepper motors for 2D (XY) or 3D (XYZ) trajectory motion. Additionally, PLC programs can
+be extended with a web-based Human Machine Interface (HMI) built using NiceGui.
 
 PyBerryPLC was created out of a practical curiosity to explore how PLCs function and what’s involved in controlling and 
 managing technical processes and machinery with a computer. Today, with versatile languages like Python and accessible, 
@@ -80,11 +80,10 @@ The main modules are `multi_axis.py` and `trajectory.py`.
 `multi_axis.py` defines the abstract `MotionProfile` class and its concrete implementations, `TrapezoidalProfile` 
 and `SCurvedProfile`, enabling you to specify motion profiles for stepper motors.
 
-`trajectory.py` contains everything needed to execute two-dimensional (planar) trajectories with two synchronized 
-stepper motors (X and Y axes). The key class is `Trajectory2DPlanner`, which takes a series of $(x, y)$ points 
-representing the start and end of each trajectory segment. The result is a `Trajectory2D` object—a list of `Segment2D` 
-objects, each containing motion profiles and rotation directions for both axes, allowing you to verify profiles before 
-execution.
+`trajectory.py` contains everything needed to execute three-dimensional trajectories with three synchronized stepper 
+motors (X, Y and Z axes). The key class is `TrajectoryPlanner`, which takes a series of $(x, y, z)$ points representing 
+the start and end of each trajectory segment. The result is a `Trajectory` object —a list of `Segment` objects, each 
+containing motion profiles and rotation directions for the axes, allowing you to verify profiles before execution.
 
 ### `hmi`
 

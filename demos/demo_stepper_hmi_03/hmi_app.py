@@ -4,7 +4,7 @@ from pyberryplc.hmi import AbstractHMI, ErrorDialog
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.motion.multi_axis import MotionProfile, MotionProfileType
-from pyberryplc.motion.trajectory import XYMotionProcessor
+from pyberryplc.motion.trajectory_old import XYMotionProcessor
 
 from plc_app import XYMotionPLC
 

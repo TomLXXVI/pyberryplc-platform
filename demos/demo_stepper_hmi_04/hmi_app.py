@@ -9,8 +9,8 @@ from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import SharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.multi_axis import MotionProfileType
-from pyberryplc.motion.trajectory import Trajectory2DPlanner, Trajectory2D
+from pyberryplc.motion.multi_axis import SCurvedProfile
+from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory, StepperMotorMock
 from pyberryplc.motion.utils import get_pitch
 
 from plc_app import XYMotionPLC
@@ -40,7 +40,7 @@ class XYMotionHMI(AbstractHMI):
         )
 
         self.points: list[tuple[float, float]] = []
-        self.trajectory = Trajectory2D()
+        self.trajectory = Trajectory()
         self.trajectory_fig = go.Figure(go.Scatter(x=[0.0], y=[0.0]))
         self.trajectory_fig.update_layout(
             title=None,
@@ -320,13 +320,13 @@ class MotionProfileDialog:
         self._dialog.open()
     
     async def _compute_trajectory(self, points: list[tuple[float, float]]):
-        trajectory_planner = Trajectory2DPlanner(
+        trajectory_planner = TrajectoryPlanner(
             pitch=get_pitch(1, 0.01),
-            motor_speed=180.0,
-            motor_accel=360.0,
-            full_steps_per_rev=200,  # must match with motor configuration file
-            microstep_factor=2,  # must match with motor configuration file
-            profile_type=MotionProfileType.S_CURVED,
+            profile_type=SCurvedProfile,
+            a_m=360.0,
+            v_m=180.0,
+            x_motor=StepperMotorMock(200, 1),
+            y_motor=StepperMotorMock(200, 1),
         )
         points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
         # `trajectory_planner.get_trajectory(*points)` may be a long running task.

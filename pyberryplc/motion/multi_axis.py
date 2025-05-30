@@ -762,8 +762,10 @@ class RotationDirection(StrEnum):
         return self == RotationDirection.COUNTERCLOCKWISE
 
     def to_int(self) -> int:
-        """Returns 1 for counterclockwise, 0 for clockwise."""
-        return int(self.to_bool())
+        """Returns 1 for counterclockwise, -1 for clockwise."""
+        if self == RotationDirection.CLOCKWISE:
+            return -1
+        return 1
 
     def __int__(self) -> int:
         return self.to_int()
