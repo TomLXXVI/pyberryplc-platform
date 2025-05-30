@@ -214,7 +214,7 @@ class FakeStepperMotor:
         microstep_factor: int = 1
     ) -> None:
         """
-        Creates a `_FakeStepperMotor` object having just the attributes needed 
+        Creates a `FakeStepperMotor` object having just the attributes needed 
         to generate the step pulse train (list of the time delays between 
         successive step pulses).
         
@@ -239,7 +239,7 @@ class FakeStepperMotor:
 
 class Segment2D:
     """
-    Represents a rectilinear segment.
+    Represents a rectilinear 2D segment.
 
     Given the start- and end point of the segment, the motion profile and the
     rotation direction of the X-axis and Y-axis movement are determined.

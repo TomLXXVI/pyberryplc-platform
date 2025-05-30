@@ -75,14 +75,14 @@ utilize a `TwoStageProfileRotator`, separating pulse train calculation (`preproc
 
 **Provides tools for defining motion profiles and trajectories.**
 
-The main modules are `motion_profile.py` and `trajectory.py`.
+The main modules are `multi_axis.py` and `trajectory.py`.
 
-`motion_profile.py` defines the abstract `MotionProfile` class and its concrete implementations, `TrapezoidalProfile` 
+`multi_axis.py` defines the abstract `MotionProfile` class and its concrete implementations, `TrapezoidalProfile` 
 and `SCurvedProfile`, enabling you to specify motion profiles for stepper motors.
 
 `trajectory.py` contains everything needed to execute two-dimensional (planar) trajectories with two synchronized 
-stepper motors (X and Y axes). The key class is `TrajectoryPlanner`, which takes a series of $(x, y)$ points 
-representing the start and end of each trajectory segment. The result is a `Trajectory` object—a list of `Segment` 
+stepper motors (X and Y axes). The key class is `Trajectory2DPlanner`, which takes a series of $(x, y)$ points 
+representing the start and end of each trajectory segment. The result is a `Trajectory2D` object—a list of `Segment2D` 
 objects, each containing motion profiles and rotation directions for both axes, allowing you to verify profiles before 
 execution.
 
