@@ -5,16 +5,19 @@ from enum import StrEnum
 from numpy.typing import NDArray
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import root_scalar
+from scipy.optimize import root_scalar, minimize
 from scipy.interpolate import interp1d
+
+from pyberryplc.charts import LineChart
 
 
 def velocity(
     t: float,
-    accel_fn: Callable[[float, float, float], float],
+    accel_fn: Callable[[float, float, float, float], float],
     t0: float = 0.0,
     v0: float = 0.0,
-    dv: float = 0.0
+    dv: float = 0.0,
+    a_top: float = 0.0
 ) -> tuple[NDArray[np.float64], ...]:
     """
     Calculates velocity values between time moments `t0` and `t` (`t` > `t0`).
@@ -33,6 +36,8 @@ def velocity(
     dv: float:
         Speed change during the movement. This helps to determine whether
         acceleration or deceleration is wanted.
+    a_top:
+        Maximum value of the acceleration profile.
 
     Returns
     -------
@@ -43,16 +48,16 @@ def velocity(
         values in `t_arr`.
     """
     # noinspection PyUnusedLocal
-    def fn(t: float, v: NDArray[np.float64], dv: float, t0: float) -> NDArray[np.float64]:
+    def fn(t: float, v: NDArray[np.float64], a_top: float, dv: float, t0: float) -> NDArray[np.float64]:
         v_dot = np.zeros(1)
-        v_dot[0] = accel_fn(t, dv, t0)
+        v_dot[0] = accel_fn(t, a_top, dv, t0)
         return v_dot
 
     sol = solve_ivp(
         fn, (t0, t), [v0], 
         method='LSODA', 
         t_eval=np.linspace(t0, t, 100, endpoint=True),
-        args=(dv, t0)
+        args=(a_top, dv, t0)
     )
     # noinspection PyUnresolvedReferences
     return sol.t, sol.y[0]
@@ -60,11 +65,12 @@ def velocity(
 
 def position(
     t: float,
-    accel_fn: Callable[[float, float, float], float],
+    accel_fn: Callable[[float, float, float, float], float],
     t0: float = 0.0,
     v0: float = 0.0,
     s0: float = 0.0,
-    dv: float = 0.0
+    dv: float = 0.0,
+    a_top: float = 0.0
 ) -> tuple[NDArray[np.floating], ...]:
     """
     Calculates position values between time moments `t0` and `t` (`t` > `t0`).
@@ -81,11 +87,13 @@ def position(
     v0: float
         Velocity of the movement at the initial time moment.
     s0: float
-        Position at the intial time moment.
+        Position at the initial time moment.
     dv: float:
         Speed change during the movement. This helps to determine whether
         acceleration or deceleration is wanted.
-
+    a_top:
+        Maximum value of the acceleration profile.
+    
     Returns
     -------
     t_arr:
@@ -98,17 +106,17 @@ def position(
         values in `t_arr`.
     """
 
-    def fn(t: float, s: NDArray[np.float64], dv: float, t0: float) -> NDArray[np.float64]:
+    def fn(t: float, s: NDArray[np.float64], a_top: float, dv: float, t0: float) -> NDArray[np.float64]:
         s_dot = np.zeros(2)
         s_dot[0] = s[1]
-        s_dot[1] = accel_fn(t, dv, t0)
+        s_dot[1] = accel_fn(t, a_top, dv, t0)
         return s_dot
 
     sol = solve_ivp(
         fn, (t0, t), [s0, v0], 
         method='LSODA', 
         t_eval=np.linspace(t0, t, endpoint=True),
-        args=(dv, t0)
+        args=(a_top, dv, t0)
     )
     # noinspection PyUnresolvedReferences
     return sol.t, sol.y[0], sol.y[1]
@@ -119,238 +127,267 @@ class MotionProfile(ABC):
     def __init__(
         self, 
         ds_tot: float,
-        a_m: float, 
+        a_m: float,
         v_m: float,
-        v_i: float = 0.0,
-        s_i: float = 0.0,
+        v_i: float | None = None,
         v_f: float | None = None,
+        s_i: float = 0.0,
         dt_tot: float | None = None
     ) -> None:
-        """
-        Creates a `MotionProfile` object.
-
-        Parameters
-        ----------
-        ds_tot : float
-            Total travel distance.
-        v_m : float
-            Maximum (allowable) velocity of the motor.
-        a_m : float
-            Maximum (allowable) acceleration of the motor.
-        dt_tot : float, optional
-            Total travel time (if known already).
-        v_i : float, optional
-            Initial velocity or start velocity. Default is 0.0.
-        v_f : float, optional
-            Final velocity, i.e. at the end of the travel distance. Default is
-            0.0. If `None` the final velocity will be set equal to the top
-            velocity of the motion profile.
-        s_i : float, optional
-            Initial position or start position. Default is 0.0.
-
-        A motion profile can be instantiated in two different ways:
-
-        1.  The travel distance `ds_tot` of the movement, the acceleration `a_m`
-            of the motor, the initial velocity `v_i` and final velocity `v_f` of
-            the movement are known.
-            The top velocity `v_top` will initially be taken as the maximum
-            velocity `v_m` of the motor. The total travel time `dt_tot` is then
-            still to be determined.
-
-        2.  The total travel distance `ds_tot` and total travel time `dt_tot` of
-            the movement, the acceleration `a_m` of the motor, the initial
-            velocity `v_ini` and final velocity `v_fin` of the movement are
-            known. The top velocity `v_top` of the movement then still needs to
-            be determined, but cannot exceed the maximum velocity `v_m` of the
-            motor.
-        """
-        self.ds_tot = ds_tot
-        self.a_m = a_m
+        # Given by the user:
         self.v_m = v_m
-        self.v_i = v_i
-        self._v_f = v_f
+        self.a_m = a_m
+        self.ds_tot = ds_tot
         self.s_i = s_i
-        self._dt_tot = dt_tot
-        self._v_top = self._get_top_velocity(self.v_m)
-        self._dt_cov: float | None = None
+        self.v_i = v_i
+        self.v_f = v_f
+        
+        # To be calculated:
+        self.v_top: float = 0.0
+        self.a_top: float = 0.0
+        self.dt_i: float = 0.0
+        self.dt_f: float = 0.0
+        self.dv_i: float = 0.0
+        self.dv_f: float = 0.0
+        self.ds_i: float = 0.0
+        self.ds_f: float = 0.0
+        self.dt_cov: float = 0.0
+        self.ds_cov: float = 0.0
+        self.dt_tot: float = 0.0
 
-    @property
-    def dv_i(self) -> float:
-        """
-        Returns the required speed change in the initial acceleration phase
-        of the motion profile.
-        """
-        if self.ds_tot > 0.0:
-            return self._v_top - self.v_i
-        return 0.0
-
-    @property
-    def dv_f(self) -> float:
-        """
-        Returns the required speed change in the final acceleration phase of the
-        motion profile.
-        """
-        if self.ds_tot > 0.0 and self._v_f is not None:
-            return self._v_f - self._v_top
-        return 0.0
+        if ds_tot > 0.0:
+            if dt_tot is None:
+                # method 1: without time constraint
+                v_top = v_m
+                if v_f and v_i is not None:
+                    dv = v_f - v_i
+                    if dv > 0.0: v_top = v_f
+                    if dv < 0.0: v_top = v_i
+                self.a_top = self.a_m
+                self.v_top = self._calc_v_top1(v_top)
+            else:
+                # method 2: with time constraint (for time synchronisation of axes)
+                # self.a_top = self.a_m
+                # self.v_top = self._calc_v_top2(dt_tot, self.a_m)
+                self.a_top, self.v_top = self._calc_v_top3(dt_tot)
     
-    @property
-    def ds_i(self) -> float:
-        """
-        Returns the acceleration distance in the initial acceleration phase of
-        the motion profile.
-        """
-        if self.ds_tot > 0.0 and self.dt_i > 0.0:
+            self.dv_i = self._calc_dv_i(self.v_top)
+            self.dt_i = self.get_dt_acc(self.dv_i, self.a_top)
+            self.ds_i = self._calc_ds_i(self.a_top, self.dv_i, self.dt_i)
+            self.dv_f = self._calc_dv_f(self.v_top)
+            self.dt_f = self.get_dt_acc(self.dv_f, self.a_top)
+            self.ds_f = self._calc_ds_f(self.v_top, self.a_top, self.dv_f, self.dt_f)
+            self.dt_cov = self._calc_dt_cov(self.v_top, self.a_top)
+            self.ds_cov = self._calc_ds_cov(self.v_top, self.a_top)
+            self.dt_tot = self._calc_dt_tot(self.v_top, self.a_top)
+    
+    def _calc_dv_i(self, v_top: float) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        return round(v_top - self.v_i, 12) if self.v_i is not None else 0.0
+    
+    def _calc_dv_f(self, v_top: float) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        return round(self.v_f - v_top, 12) if self.v_f is not None else 0.0 
+    
+    def _calc_ds_i(
+        self, 
+        a_top: float, 
+        dv_i: float,
+        dt_i: float
+    ) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        if dt_i >= 0.0:
+            if dt_i == 0.0: return 0.0
             t_arr, s_arr, _ = position(
-                self.dt_i, self.accel_fn,
+                dt_i, self.accel_fn,
                 t0=0.0,
                 v0=self.v_i,
                 s0=0.0,
-                dv=self.dv_i
+                dv=dv_i,
+                a_top=a_top
             )
             return float(s_arr[-1])
-        return 0.0
+        raise ValueError("ds_i cannot be determined.")
     
-    @property
-    def ds_f(self) -> float:
-        """
-        Returns the acceleration distance in the final acceleration phase of
-        the motion profile.
-        """
-        if self.ds_tot > 0.0 and self._v_f is not None and self.dt_f > 0.0:
+    def _calc_ds_f(
+        self, 
+        v_top: float, 
+        a_top: float, 
+        dv_f: float,
+        dt_f: float
+    ) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        if dt_f >= 0.0:
+            if dt_f == 0.0: return 0.0
             t_arr, s_arr, _ = position(
-                self.dt_f, self.accel_fn,
+                dt_f, self.accel_fn,
                 t0=0.0,
-                v0=self._v_top,
+                v0=v_top,
                 s0=0.0,
-                dv=self.dv_f
+                dv=dv_f,
+                a_top=a_top
             )
             return float(s_arr[-1])
-        return 0.0
+        raise ValueError("ds_f cannot be determined.")
     
-    @property
-    def ds_cov(self) -> float:
-        """
-        Returns the travel distance at constant top velocity (acceleration is
-        zero).
-        """
-        if self.ds_tot > 0.0:
-            return self.ds_tot - (self.ds_i + self.ds_f)
-        return 0.0
-
-    def _get_top_velocity(self, v: float) -> float:
-        """
-        Returns the top velocity for the movement.
-        """
-        if self.ds_tot > 0.0:
-            self._v_top = v
-            if self.ds_cov < 0.0:
-                self._v_top = self._search_top_velocity()
-            return self._v_top
-        return 0.0
+    def _calc_ds_cov(self, v_top: float, a_top: float) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        dv_i = self._calc_dv_i(v_top)
+        dt_i = self.get_dt_acc(dv_i, a_top)
+        ds_i = self._calc_ds_i(a_top, dv_i, dt_i)
+        dv_f = self._calc_dv_f(v_top)
+        dt_f = self.get_dt_acc(dv_f, a_top)
+        ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
+        return self.ds_tot - (ds_i + ds_f)
     
-    def _search_top_velocity(self) -> float:
+    def _calc_dt_cov(self, v_top: float, a_top: float) -> float:
+        if self.ds_tot == 0.0: return 0.0
+        ds_cov = self._calc_ds_cov(v_top, a_top)
+        return ds_cov / v_top
+    
+    def _calc_dt_tot(self, v_top: float, a_top: float) -> float:
+        dv_i = self._calc_dv_i(v_top)
+        dt_i = self.get_dt_acc(dv_i, a_top)
+        dv_f = self._calc_dv_f(v_top)
+        dt_f = self.get_dt_acc(dv_f, a_top)
+        dt_cov = self._calc_dt_cov(v_top, a_top)
+        return dt_i + dt_f + dt_cov
+    
+    def _calc_v_top1(self, v_top_ini: float) -> float:
         """
-        Searches for the top velocity for which `ds_cov` equals zero (i.e.
+        Searches for the top velocity for which `ds_cov` equals zero (i.e. a
         movement without constant-velocity phase).
         """
+        def _search_top_velocity1(a_top: float) -> float:
+            def fn(v: float) -> float:
+                ds_cov = self._calc_ds_cov(v, a_top)
+                return ds_cov
 
-        def fn(v: float) -> float:
-            self._v_top = v
-            return self.ds_cov
+            try:
+                sol = root_scalar(fn, bracket=[1.e-12, self.v_m])
+                return sol.root
+            except ValueError:
+                raise ValueError("Could not find a suitable top velocity.")
         
+        if self.ds_tot == 0.0: return 0.0
+        ds_cov = self._calc_ds_cov(v_top_ini, self.a_top)
+        if ds_cov < 0.0:
+            v_top = _search_top_velocity1(self.a_top)
+            return v_top
+        return v_top_ini
+    
+    def _calc_v_top2(self, dt_tot: float, a_top: float) -> float:
+        """
+        Searches the top velocity `v_top` of the movement for which the required
+        total travel distance `self.ds_tot` will be finished after `dt_tot` 
+        seconds when the acceleration is `a_top`.
+        """
+        dev = np.nan
+
+        def fn(v_top: float) -> float:
+            nonlocal dev
+            # Determine the required velocity change in the initial and final
+            # acceleration phase of the movement.
+            dv_i = v_top - self.v_i if self.v_i is not None else 0.0
+            dv_f = self.v_f - v_top if self.v_f is not None else 0.0
+            # Based on the value `a_top` for the top acceleration, get the 
+            # required acceleration time in the initial and final acceleration
+            # phase of the movement.
+            dt_i = self.get_dt_acc(dv_i, a_top)
+            dt_f = self.get_dt_acc(dv_f, a_top)
+            # Determine the remaining time in the constant-velocity phase
+            # of the movement.
+            dt_cov = dt_tot - (dt_i + dt_f)
+            # A negative time duration of the constant-velocity phase, means
+            # that the required time duration of the initial and final 
+            # acceleration phase exceeds the available total travel time `dt_tot`
+            # and so the current value of `v_top` is unsuitable. 
+            if dt_cov < 0.0:
+                if np.isnan(dev): return dev  # --> will cause an exception
+                return np.inf if dev < 0.0 else -np.inf
+            # Find the travelled distance in the constant-velocity phase, the
+            # initial acceleration phase and final acceleration phase.
+            ds_cov = v_top * dt_cov
+            ds_i = self._calc_ds_i(a_top, dv_i, dt_i)
+            ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
+            # Determine the total travel distance of the movement with the 
+            # current value for `v_top`.
+            ds_tot = ds_i + ds_cov + ds_f
+            # Determine the deviation with the required total travel distance.
+            dev = self.ds_tot - ds_tot
+            return dev
+
         try:
-            sol = root_scalar(fn, bracket=[1.e-6, self.v_m])
+            # Searches the top velocity `v_top` for which the required total
+            # travel distance `self.ds_tot` is finished within the available
+            # time `dt_tot` with acceleration `a_top`.
+            sol = root_scalar(fn, bracket=[1.e-12, self.v_m], method='brentq')
+            return sol.root
         except ValueError:
-            raise ValueError("Failed to find a suitable top velocity") from None
-        return sol.root
+            raise ValueError("Could not find a suitable top velocity.")
 
-    @property
-    def v_top(self) -> float:
-        return self._v_top
-
-    @v_top.setter
-    def v_top(self, v: float) -> None:
+    def _calc_v_top3(
+        self,
+        dt_tot: float
+    ) -> tuple[float, float]:
         """
-        Sets the top velocity for the movement.
+        Searches the top velocity `v_top` of the movement for which the required
+        total travel distance `self.ds_tot` will be finished after `dt_tot` 
+        seconds.
         """
-        self._v_top = v
-
-    @property
-    def v_f(self) -> float:
-        """
-        Returns the final velocity at the end of the movement.
-        """
-        if self._v_f is None:
-            return self.v_top
-        return self._v_f
-
-    @property
-    def dt_cov(self) -> float | None:
-        """
-        Returns the travel time at constant top velocity.
-        """
-        if self.ds_tot > 0.0:
-            return round(self.ds_cov / self.v_top, 6)
-        elif self._dt_cov is not None:
-            return self._dt_cov
-        return 0.0
-
-    @property
-    def dt_tot(self) -> float:
-        """
-        Returns the total travel time of the movement.
-        """
-        if self._dt_tot is not None:
-            return self._dt_tot
-        if self.ds_tot > 0.0:
-            return self.dt_i + self.dt_cov + self.dt_f
-        return 0.0
-
-    @dt_tot.setter
-    def dt_tot(self, v: float) -> None:
-        """Sets the total travel time. Only to be used with multi-axis motion
-        when the current axis is not moving.
-        """
-        self._dt_tot = v
-        self._dt_cov = v
-
-    @property
+        def fn(x: NDArray[np.float64]) -> float:
+            try:
+                v_top, a_top = float(x[0]), float(x[1])
+                dv_i = self._calc_dv_i(v_top)
+                dv_f = self._calc_dv_f(v_top)
+                
+                dt_i = self.get_dt_acc(dv_i, a_top)
+                dt_f = self.get_dt_acc(dv_f, a_top)
+                dt_cov = dt_tot - (dt_i + dt_f)
+                if dt_cov < 0.0: raise ValueError
+         
+                ds_i = self._calc_ds_i(a_top, dv_i, dt_i)
+                ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
+                ds_cov1 = self.ds_tot - (ds_i + ds_f)
+                if ds_cov1 < 0.0: raise ValueError
+         
+                # the constant-velocity travel distance must also satisfy: 
+                ds_cov2 = v_top * dt_cov
+                dev = ds_cov2 - ds_cov1
+                return dev ** 2
+            except ValueError:
+                return 1e10
+        
+        v_guess = self.v_m / 2
+        a_guess = 2 * self.v_m
+        initial_guess = np.array([v_guess, a_guess])
+        bounds = [(0.0, self.v_m), (0.0, self.a_m)]
+        result = minimize(fn, initial_guess, bounds=bounds, method="Nelder-Mead")
+        if result.success:
+            v_top, a_top = result.x[0], result.x[1]
+            return a_top, v_top
+        raise ValueError("Could not find suitable values for top velocity and top acceleration.")
+    
+    @staticmethod
     @abstractmethod
-    def dt_i(self) -> float:
-        """
-        Returns the initial acceleration time, i.e. the time duration of the
-        initial acceleration phase.
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def dt_f(self) -> float:
-        """
-        Returns the final acceleration time, i.e. the time duration of the
-        final acceleration phase.
-        """
+    def accel_fn(t: float, a_top: float, dv: float, t0: float = 0.0):
         ...
     
+    @staticmethod
     @abstractmethod
-    def accel_fn(self, t: float, dv: float, t0: float = 0.0) -> float:
-        """
-        Returns the acceleration at time moment `t`.
-
-        Parameters
-        ----------
-        t: float
-            Time moment for which the acceleration needs to be determined.
-        t0: float
-            Initial time moment, i.e. the time moment the acceleration phase
-            starts.
-        dv: float
-            Required speed change. This helps to determine whether acceleration
-            or deceleration is needed.
-        """
+    def get_dt_acc(dv: float, a_top: float) -> float:
         ...
-
+        
+    @staticmethod
+    @abstractmethod
+    def get_dv(a_top: float, dt_acc: float) -> float:
+        ...
+    
+    @staticmethod
+    @abstractmethod
+    def get_a_top(dv: float, dt_acc: float) -> float:
+        ...
+    
     def velocity_profile(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculates the velocity profile of the movement.
@@ -363,10 +400,10 @@ class MotionProfile(ABC):
             Numpy array with the corresponding values on the velocity-axis.
         """
         # initial acceleration phase
-        t0, v0 = 0.0, self.v_i
+        t0, v0 = 0.0, self.v_i if self.v_i is not None else self.v_top
         t1 = t0 + self.dt_i
         if self.dt_i > 0.0:
-            t1_arr, v1_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_i)
+            t1_arr, v1_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_i, self.a_top)
         else:
             t1_arr, v1_arr = np.array([t0]), np.array([v0])
 
@@ -384,7 +421,7 @@ class MotionProfile(ABC):
         # final acceleration phase
         if self.dt_f > 0:
             t3 = t2 + self.dt_f
-            t3_arr, v3_arr = velocity(t3, self.accel_fn, t2, v2, self.dv_f)
+            t3_arr, v3_arr = velocity(t3, self.accel_fn, t2, v2, self.dv_f, self.a_top)
         else:
             t3_arr, v3_arr = None, None
 
@@ -415,10 +452,10 @@ class MotionProfile(ABC):
             Numpy array with the corresponding values on the position-axis.
         """
         # initial acceleration phase
-        t0, v0, s0 = 0.0, self.v_i, self.s_i
+        t0, v0, s0 = 0.0, self.v_i if self.v_i is not None else self.v_top, self.s_i
         t1 = t0 + self.dt_i
         if self.dt_i > 0.0:
-            t1_arr, s1_arr, v1_arr = position(t1, self.accel_fn, t0, v0, s0, self.dv_i)
+            t1_arr, s1_arr, v1_arr = position(t1, self.accel_fn, t0, v0, s0, self.dv_i, self.a_top)
         else:
             t1_arr, s1_arr, v1_arr = np.array([t0]), np.array([s0]), np.array([v0])
 
@@ -436,7 +473,7 @@ class MotionProfile(ABC):
         # final acceleration phase
         if self.dt_f > 0.0:
             t3 = t2 + self.dt_f
-            t3_arr, s3_arr, _ = position(t3, self.accel_fn, t2, v2, s2, self.dv_f)
+            t3_arr, s3_arr, _ = position(t3, self.accel_fn, t2, v2, s2, self.dv_f, self.a_top)
         else:
             t3_arr, s3_arr = None, None
 
@@ -470,7 +507,7 @@ class MotionProfile(ABC):
         t0, a0 = 0.0, 0.0
         t1 = t0 + self.dt_i
         t1_arr = np.linspace(t0, t1, endpoint=True)
-        a1_arr = np.array([self.accel_fn(t, self.dv_i, t0) for t in t1_arr])
+        a1_arr = np.array([self.accel_fn(t, self.a_top, self.dv_i, t0) for t in t1_arr])
 
         # constant-velocity phase
         t1, a1 = float(t1_arr[-1]), float(a1_arr[-1])
@@ -488,7 +525,7 @@ class MotionProfile(ABC):
         if self.dt_f > 0:
             t3 = t2 + self.dt_f
             t3_arr = np.linspace(t2, t3, endpoint=True)
-            a3_arr = np.array([self.accel_fn(t, self.dv_f, t2) for t in t3_arr])
+            a3_arr = np.array([self.accel_fn(t, self.a_top, self.dv_f, t2) for t in t3_arr])
         else:
             t3_arr, a3_arr = None, None
 
@@ -506,7 +543,64 @@ class MotionProfile(ABC):
             a_arr = np.concatenate((a1_arr[:-1], a2_arr[:-1], a3_arr))
 
         return t_arr, a_arr
+    
+    @staticmethod
+    def plot_position_profiles(*mps: 'MotionProfile') -> LineChart:
+        """
+        Returns a `LineChart` with the position profiles of the motion profiles.
+        Call `show()` on the `LineChart` object to display the plot. 
+        """
+        chart = LineChart()
+        for i, mp in enumerate(mps):
+            t_arr, s_arr = mp.position_profile()
+            chart.add_xy_data(
+                label=f"position, MP{i + 1}",
+                x1_values=t_arr,
+                y1_values=s_arr
+            )
+        chart.x1.add_title("time, s")
+        chart.y1.add_title("position")
+        chart.add_legend()
+        return chart
 
+    @staticmethod
+    def plot_velocity_profiles(*mps: 'MotionProfile') -> LineChart:
+        """
+        Returns a `LineChart` with the velocity profiles of the motion profiles.
+        Call `show()` on the `LineChart` object to display the plot. 
+        """
+        chart = LineChart()
+        for i, mp in enumerate(mps):
+            t_arr, v_arr = mp.velocity_profile()
+            chart.add_xy_data(
+                label=f"velocity, MP{i + 1}",
+                x1_values=t_arr,
+                y1_values=v_arr
+            )
+        chart.x1.add_title("time, s")
+        chart.y1.add_title("velocity")
+        chart.add_legend()
+        return chart
+
+    @staticmethod
+    def plot_acceleration_profiles(*mps: 'MotionProfile') -> LineChart:
+        """
+        Returns a `LineChart` with the acceleration profiles of the motion 
+        profiles. Call `show()` on the `LineChart` object to display the plot. 
+        """
+        chart = LineChart()
+        for i, mp in enumerate(mps):
+            t_arr, a_arr = mp.acceleration_profile()
+            chart.add_xy_data(
+                label=f"acceleration, MP{i + 1}",
+                x1_values=t_arr,
+                y1_values=a_arr
+            )
+        chart.x1.add_title("time, s")
+        chart.y1.add_title("acceleration")
+        chart.add_legend()
+        return chart
+    
     def get_velocity_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` and returns the
@@ -573,7 +667,7 @@ class MotionProfile(ABC):
         """
         t0, v0 = 0.0, 0.0
         t1 = t0 + self.dt_i
-        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_i)
+        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_i, self.a_top)
         v_max = v_arr[-1]
         interp = interp1d(t_arr, v_arr)
 
@@ -609,7 +703,7 @@ class MotionProfile(ABC):
             Initial velocity at the start of the final acceleration phase.
         """
         t1 = t0 + self.dt_f
-        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_f)
+        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_f, self.a_top)
         interp = interp1d(t_arr, v_arr)
 
         def f(t: float) -> float:
@@ -635,7 +729,7 @@ class MotionProfile(ABC):
         """
         t0, v0, s0 = 0.0, 0.0, 0.0
         t1 = t0 + self.dt_i
-        t_arr, s_arr, v_arr = position(t1, self.accel_fn, t0, v0, s0, self.dv_i)
+        t_arr, s_arr, v_arr = position(t1, self.accel_fn, t0, v0, s0, self.dv_i, self.a_top)
         t_min = t_arr[0]
         t_max = t_arr[-1]
         s_max = s_arr[-1]
@@ -677,7 +771,7 @@ class MotionProfile(ABC):
             Initial velocity at the start of the final acceleration phase.
         """
         t1 = t0 + self.dt_f
-        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_f)
+        t_arr, v_arr = velocity(t1, self.accel_fn, t0, v0, self.dv_f, self.a_top)
 
         # Between t0 and t1 it is possible for the velocity to become negative
         # depending on the initial conditions.
@@ -689,7 +783,7 @@ class MotionProfile(ABC):
             sol = root_scalar(interp_t, bracket=[t_pos, t_neg])
             t1 = sol.root
 
-        t_arr, s_arr, v_arr = position(t1, self.accel_fn, t0, v0, s0)
+        t_arr, s_arr, v_arr = position(t1, self.accel_fn, t0, v0, s0, self.a_top)
         t_min = t_arr[0]
         t_max = t_arr[-1]
         s_max = s_arr[-1]
@@ -709,39 +803,37 @@ class MotionProfile(ABC):
 
 
 class TrapezoidalProfile(MotionProfile):
-    
-    @property
-    def dt_i(self) -> float:
-        return abs(self.dv_i) / self.a_m
-    
-    @property
-    def dt_f(self) -> float:
-        return abs(self.dv_f) / self.a_m
-    
-    def accel_fn(self, t: float, dv: float, t0: float = 0.0) -> float:
+        
+    @staticmethod
+    def accel_fn(t: float, a_top: float, dv: float, t0: float = 0.0) -> float:
         if dv < 0.0:
-            return -self.a_m
+            return -a_top
         elif dv > 0.0:
-            return self.a_m
+            return a_top
         else:
             return 0.0
- 
+
+    @staticmethod
+    def get_dt_acc(dv: float, a_top: float) -> float:
+        return round(abs(dv) / a_top, 12)
+    
+    @staticmethod
+    def get_dv(a_top: float, dt_acc: float) -> float:
+        return a_top * dt_acc
+    
+    @staticmethod
+    def get_a_top(dv: float, dt_acc: float) -> float:
+        return abs(dv) / dt_acc
+
 
 class SCurvedProfile(MotionProfile):
     
-    @property
-    def dt_i(self) -> float:
-        return round(2 * abs(self.dv_i) / self.a_m, 6)
-    
-    @property
-    def dt_f(self) -> float:
-        return round(2 * abs(self.dv_f) / self.a_m, 6)
-
-    def accel_fn(self, t: float, dv: float, t0: float = 0.0) -> float:
+    @staticmethod
+    def accel_fn(t: float, a_top: float, dv: float, t0: float = 0.0) -> float:
         if dv != 0.0:
-            k = self.a_m ** 2 / abs(dv)
+            k = a_top ** 2 / abs(dv)
             if dv < 0.0: k *= -1
-            dt = 2 * abs(dv) / self.a_m
+            dt = 2 * abs(dv) / a_top
             t1 = t0 + dt / 2
             t2 = t0 + dt
             if t0 <= t < t1:
@@ -751,6 +843,18 @@ class SCurvedProfile(MotionProfile):
             else:
                 return 0.0
         return 0.0
+
+    @staticmethod
+    def get_dt_acc(dv: float, a_top: float) -> float:
+        return round(2 * abs(dv) / a_top, 12)
+
+    @staticmethod
+    def get_dv(a_top: float, dt_acc: float) -> float:
+        return (a_top * dt_acc) / 2.0
+
+    @staticmethod
+    def get_a_top(dv: float, dt_acc: float) -> float:
+        return 2.0 * abs(dv) / dt_acc
 
 
 class RotationDirection(StrEnum):
