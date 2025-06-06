@@ -395,9 +395,9 @@ def minimize_profile_time(
         Maximum acceleration of the motor (e.g. in degrees/s²).
     v_m:
         Maximum speed of the motor (e.g. in deg/s)
-    v_i: optional
+    v_i: 
         Start velocity of the movement (e.g. in deg/s) if known. 
-    v_f: optional
+    v_f: 
         End velocity of the movement (e.g. in deg/s) if known.
         Note that `v_i` and `v_f` cannot be both `None`. Either the start or
         end velocity must be specified.

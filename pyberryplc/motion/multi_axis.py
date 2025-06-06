@@ -1,3 +1,14 @@
+"""
+Definition of motion profiles for use in single- or multi-axis motion.
+
+Two types of profiles are implemented in this module:
+- Class `TrapezoidalProfile` defines a trapezoidal motion profile.
+- Class `SCurvedProfile` defines a pure S-curved motion profile.
+
+References
+----------
+Gürocak, H. (2016), Industrial Motion Control, John Wiley & Sons.
+"""
 from typing import Callable
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -134,6 +145,35 @@ class MotionProfile(ABC):
         s_i: float = 0.0,
         dt_tot: float | None = None
     ) -> None:
+        """Creates a `MotionProfile` object.
+        
+        Parameters
+        ----------
+        ds_tot:
+            Total travel distance.
+        a_m:
+            Maximum acceleration of the motor.
+        v_m:
+            Maximum speed of the motor.
+        v_i: 
+            Start velocity of the movement if known.
+        v_f: optional
+            End velocity of the movement if known.
+            Note that `v_i` and `v_f` cannot be both `None`. Either the start or
+            end velocity must be specified.
+        s_i:
+            Initial position of the axis or motor shaft.
+        dt_tot: optional
+            Total travel time. When total travel time is specified, a motion
+            profile is tried to be calculated such that the movement with a 
+            total travel distance `ds_tot` is finished after `dt_tot` (seconds).
+        
+        Units can be chosen freely, must they must be consistent. Usually time
+        units will be seconds. Position (and displacement), velocity, and
+        acceleration are related by their units of length. If time is in seconds 
+        and position in units of mm, then velocity must be in mm/s and 
+        acceleration in mm/s².
+        """
         # Given by the user:
         self.v_m = v_m
         self.a_m = a_m

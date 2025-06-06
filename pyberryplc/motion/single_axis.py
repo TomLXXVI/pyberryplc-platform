@@ -5,7 +5,7 @@ The motion always starts from rest and also ends in rest.
 
 Two types of profiles are implemented in this module:
 - Class `TrapezoidalProfile` defines a trapezoidal motion profile.
-- Class `SCurvedProfile` defines a pure S-curve motion profile.
+- Class `SCurvedProfile` defines a pure S-curved motion profile.
 
 References
 ----------
