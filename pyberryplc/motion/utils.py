@@ -307,7 +307,7 @@ def get_3Dtrajectory_path(
     return (x_arr, y_arr, z_arr), (pts_x, pts_y, pts_z)
 
 
-def compute_2Dsegment_path_deviation(segment, num_points: int = 100) -> float:
+def compute_2Dsegment_path_deviation(segment: Segment, num_points: int = 100) -> float:
     """
     Returns the maximum deviation between the actual segment path and the
     ideal, rectilinear segment path.
@@ -340,7 +340,7 @@ def compute_2Dsegment_path_deviation(segment, num_points: int = 100) -> float:
     return max_dev
 
 
-def compute_3Dsegment_path_deviation(segment, num_points: int = 100) -> float:
+def compute_3Dsegment_path_deviation(segment: Segment, num_points: int = 100) -> float:
     """
     Returns the maximum deviation between the actual segment path and the
     ideal, rectilinear segment path.
@@ -382,8 +382,8 @@ def minimize_profile_time(
     s_i: float = 0.0
 ) -> MotionProfile:
     """
-    Returns a motion profile with an optimal start/end velocity to make the
-    required axis displacement in the shortest possible time.
+    Returns a motion profile with an optimized start or end velocity to make the
+    required axis displacement in the shortest possible travel time.
     
     Parameters
     ----------
@@ -414,6 +414,7 @@ def minimize_profile_time(
     """
     if v_i is None and v_f is None:
         raise ValueError("`v_i` and `v_f` cannot be both `None`.")
+    
     axisdata = AxisData(
         profile_type=profile_type,
         dtheta=ds_tot,
@@ -426,7 +427,9 @@ def minimize_profile_time(
         pitch=0.0,
         d_tot=0.0
     )
+    
     v_other = v_i if v_i is not None else v_f
     find = "v_i" if v_i is None else "v_f" 
+    
     mp = TrajectoryPlanner._minimize_profile_time(axisdata, v_other, find)
     return mp

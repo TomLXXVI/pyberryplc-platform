@@ -16,7 +16,7 @@ from enum import StrEnum
 from numpy.typing import NDArray
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import root_scalar, minimize
+from scipy.optimize import root_scalar, minimize_scalar, minimize
 from scipy.interpolate import interp1d
 
 from pyberryplc.charts import LineChart
@@ -206,10 +206,11 @@ class MotionProfile(ABC):
                 self.a_top = self.a_m
                 self.v_top = self._calc_v_top1(v_top)
             else:
-                # method 2: with time constraint (for time synchronisation of axes)
-                # self.a_top = self.a_m
-                # self.v_top = self._calc_v_top2(dt_tot, self.a_m)
-                self.a_top, self.v_top = self._calc_v_top3(dt_tot)
+                # method 2: with time constraint (for time synchronisation of 
+                # axes)
+                self.a_top = self.a_m
+                self.v_top = self._calc_v_top2(dt_tot, self.a_top)
+                # self.a_top, self.v_top = self._calc_v_top3(dt_tot)
     
             self.dv_i = self._calc_dv_i(self.v_top)
             self.dt_i = self.get_dt_acc(self.dv_i, self.a_top)
@@ -322,58 +323,42 @@ class MotionProfile(ABC):
         total travel distance `self.ds_tot` will be finished after `dt_tot` 
         seconds when the acceleration is `a_top`.
         """
-        dev = np.nan
-
         def fn(v_top: float) -> float:
-            nonlocal dev
-            # Determine the required velocity change in the initial and final
-            # acceleration phase of the movement.
-            dv_i = v_top - self.v_i if self.v_i is not None else 0.0
-            dv_f = self.v_f - v_top if self.v_f is not None else 0.0
-            # Based on the value `a_top` for the top acceleration, get the 
-            # required acceleration time in the initial and final acceleration
-            # phase of the movement.
-            dt_i = self.get_dt_acc(dv_i, a_top)
-            dt_f = self.get_dt_acc(dv_f, a_top)
-            # Determine the remaining time in the constant-velocity phase
-            # of the movement.
-            dt_cov = dt_tot - (dt_i + dt_f)
-            # A negative time duration of the constant-velocity phase, means
-            # that the required time duration of the initial and final 
-            # acceleration phase exceeds the available total travel time `dt_tot`
-            # and so the current value of `v_top` is unsuitable. 
-            if dt_cov < 0.0:
-                if np.isnan(dev): return dev  # --> will cause an exception
-                return np.inf if dev < 0.0 else -np.inf
-            # Find the travelled distance in the constant-velocity phase, the
-            # initial acceleration phase and final acceleration phase.
-            ds_cov = v_top * dt_cov
-            ds_i = self._calc_ds_i(a_top, dv_i, dt_i)
-            ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
-            # Determine the total travel distance of the movement with the 
-            # current value for `v_top`.
-            ds_tot = ds_i + ds_cov + ds_f
-            # Determine the deviation with the required total travel distance.
-            dev = self.ds_tot - ds_tot
-            return dev
+            try:
+                dv_i = self._calc_dv_i(v_top)
+                dv_f = self._calc_dv_f(v_top)
 
-        try:
-            # Searches the top velocity `v_top` for which the required total
-            # travel distance `self.ds_tot` is finished within the available
-            # time `dt_tot` with acceleration `a_top`.
-            sol = root_scalar(fn, bracket=[1.e-12, self.v_m], method='brentq')
-            return sol.root
-        except ValueError:
-            raise ValueError("Could not find a suitable top velocity.")
+                dt_i = self.get_dt_acc(dv_i, a_top)
+                dt_f = self.get_dt_acc(dv_f, a_top)
+                dt_cov = dt_tot - (dt_i + dt_f)
+                if dt_cov < 0.0: raise ValueError
+
+                ds_i = self._calc_ds_i(a_top, dv_i, dt_i)
+                ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
+                ds_cov1 = self.ds_tot - (ds_i + ds_f)
+                if ds_cov1 < 0.0: raise ValueError
+
+                # the constant-velocity travel distance must also satisfy: 
+                ds_cov2 = v_top * dt_cov
+
+                dev = ds_cov2 - ds_cov1
+                return dev ** 2
+            except ValueError:
+                return 1e10
+
+        res = minimize_scalar(fn, bounds=(1.0, self.v_m), method='bounded')
+        if res.success:
+            return res.x
+        raise ValueError("Could not find a suitable top velocity.")
 
     def _calc_v_top3(
         self,
         dt_tot: float
     ) -> tuple[float, float]:
         """
-        Searches the top velocity `v_top` of the movement for which the required
-        total travel distance `self.ds_tot` will be finished after `dt_tot` 
-        seconds.
+        Searches a combination for the top velocity `v_top` and top acceleration 
+        `a_top` of a movement for which the required total travel distance 
+        `self.ds_tot` needs to be finished at `dt_tot` seconds. 
         """
         def fn(x: NDArray[np.float64]) -> float:
             try:
@@ -393,13 +378,14 @@ class MotionProfile(ABC):
          
                 # the constant-velocity travel distance must also satisfy: 
                 ds_cov2 = v_top * dt_cov
+                
                 dev = ds_cov2 - ds_cov1
                 return dev ** 2
             except ValueError:
                 return 1e10
         
         v_guess = self.v_m / 2
-        a_guess = 2 * self.v_m
+        a_guess = self.a_m
         initial_guess = np.array([v_guess, a_guess])
         bounds = [(0.0, self.v_m), (0.0, self.a_m)]
         result = minimize(fn, initial_guess, bounds=bounds, method="Nelder-Mead")
