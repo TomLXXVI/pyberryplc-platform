@@ -1099,15 +1099,6 @@ class TrajectoryPlanner:
         for k, axd in moving_axes.items():
             v_other = axd.omega_f if find == "v_i" else axd.omega_i
             mp = TrajectoryPlanner._minimize_profile_time(axd, v_other, find)
-            # v_i = None if find == "v_i" else axd.omega_i
-            # v_f = None if find == "v_f" else axd.omega_f
-            # mp = axd.profile_type(
-            #     ds_tot=axd.dtheta,
-            #     a_m=axd.alpha_m,
-            #     v_m=axd.omega_m,
-            #     v_i=v_i,
-            #     v_f=v_f
-            # )
             motion_profiles[k] = mp
 
         # Get the motion profile with the longest travel time and recreate the
