@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pyberryplc.charts import LineChart
-from pyberryplc.motion.trajectory import (
+from pyberryplc.motion.trajectory_new import (
     Segment, 
     Trajectory, 
     TPointPair, 
@@ -159,14 +159,14 @@ def get_2Dsegment_path(
     thetay_fn = np.vectorize(segment.mp_y.get_position_time_fn())
     t_arr = np.linspace(0.0, segment.mp_x.dt_tot, num_points)
 
-    x_arr = thetax_fn(t_arr) / (360.0 * segment.xpitch)
+    x_arr = thetax_fn(t_arr) / (360.0 * segment.segmentdata.xpitch)
     x0_arr = np.full_like(x_arr, x_arr[0])
-    dx_arr = (x_arr - x0_arr) * segment.rdir_x.to_int()
+    dx_arr = (x_arr - x0_arr) * segment.segmentdata.rdir_x.to_int()
     x_arr = x0_arr + dx_arr
 
-    y_arr = thetay_fn(t_arr) / (360.0 * segment.ypitch)
+    y_arr = thetay_fn(t_arr) / (360.0 * segment.segmentdata.ypitch)
     y0_arr = np.full_like(y_arr, y_arr[0])
-    dy_arr = (y_arr - y0_arr) * segment.rdir_y.to_int()
+    dy_arr = (y_arr - y0_arr) * segment.segmentdata.rdir_y.to_int()
     y_arr = y0_arr + dy_arr
 
     return (x_arr, y_arr), segment.point_pair
@@ -200,19 +200,19 @@ def get_3Dsegment_path(
     thetaz_fn = np.vectorize(segment.mp_z.get_position_time_fn())
     t_arr = np.linspace(0.0, segment.mp_x.dt_tot, num_points)
 
-    x_arr = thetax_fn(t_arr) / (360.0 * segment.xpitch)
+    x_arr = thetax_fn(t_arr) / (360.0 * segment.segmentdata.xpitch)
     x0_arr = np.full_like(x_arr, x_arr[0])
-    dx_arr = (x_arr - x0_arr) * segment.rdir_x.to_int()
+    dx_arr = (x_arr - x0_arr) * segment.segmentdata.rdir_x.to_int()
     x_arr = x0_arr + dx_arr
 
-    y_arr = thetay_fn(t_arr) / (360.0 * segment.ypitch)
+    y_arr = thetay_fn(t_arr) / (360.0 * segment.segmentdata.ypitch)
     y0_arr = np.full_like(y_arr, y_arr[0])
-    dy_arr = (y_arr - y0_arr) * segment.rdir_y.to_int()
+    dy_arr = (y_arr - y0_arr) * segment.segmentdata.rdir_y.to_int()
     y_arr = y0_arr + dy_arr
 
-    z_arr = thetaz_fn(t_arr) / (360.0 * segment.zpitch)
+    z_arr = thetaz_fn(t_arr) / (360.0 * segment.segmentdata.zpitch)
     z0_arr = np.full_like(z_arr, z_arr[0])
-    dz_arr = (z_arr - z0_arr) * segment.rdir_z.to_int()
+    dz_arr = (z_arr - z0_arr) * segment.segmentdata.rdir_z.to_int()
     z_arr = z0_arr + dz_arr
     
     return (x_arr, y_arr, z_arr), segment.point_pair
@@ -425,11 +425,12 @@ def minimize_profile_time(
         omega_f=v_f,
         rdir=RotationDirection.COUNTERCLOCKWISE,
         pitch=0.0,
-        d_tot=0.0
+        dt_tot=0.0,
+        mp=None
     )
     
     v_other = v_i if v_i is not None else v_f
     find = "v_i" if v_i is None else "v_f" 
     
-    mp = TrajectoryPlanner._minimize_profile_time(axisdata, v_other, find)
+    mp = TrajectoryPlanner._minimize_axis_profile_time(axisdata, v_other, find)
     return mp

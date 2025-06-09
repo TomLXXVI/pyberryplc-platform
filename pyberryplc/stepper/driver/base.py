@@ -242,7 +242,7 @@ class ProfileRotator(Rotator):
             except AttributeError:
                 angles = [i * step_angle for i in range(num_steps + 1)]
             times = list(map(self._motion_profile.get_time_position_fn(), angles))
-            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
+            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times[:-1], times[1:])]
             self._delays = delays
         else:
             self._delays = []
@@ -297,7 +297,7 @@ class ProfileRotatorThreaded(NonBlockingRotator):
             except AttributeError:
                 angles = [i * step_angle for i in range(num_steps + 1)]
             times = list(map(self._motion_profile.get_time_position_fn(), angles))
-            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times, times[1:])]
+            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times[:-1], times[1:])]
             self._queue = deque(delays)
         else:
             self._queue = deque()

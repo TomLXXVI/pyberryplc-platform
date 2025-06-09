@@ -37,7 +37,8 @@ class AxisData:
     omega_f: float
     rdir: RotationDirection
     pitch: float
-    d_tot: float
+    dt_tot: float
+    mp: MotionProfile | None
 
 
 @dataclass
@@ -73,10 +74,13 @@ class SegmentData:
     xpitch: float = 0.0
     ypitch: float = 0.0
     zpitch: float = 0.0
-    dtot_x: float = 0.0
-    dtot_y: float = 0.0
-    dtot_z: float = 0.0
-
+    dt_tot_x: float = 0.0
+    dt_tot_y: float = 0.0
+    dt_tot_z: float = 0.0
+    mp_x: MotionProfile | None = None
+    mp_y: MotionProfile | None = None
+    mp_z: MotionProfile | None = None
+    
     def get_xaxis_data(self) -> AxisData:
         return AxisData(
             dtheta=self.dtheta_x,
@@ -88,7 +92,8 @@ class SegmentData:
             profile_type=self.profile_type,
             rdir=self.rdir_x,
             pitch=self.xpitch,
-            d_tot=self.dtot_x
+            dt_tot=self.dt_tot_x,
+            mp=self.mp_x
         )
 
     def get_yaxis_data(self) -> AxisData:
@@ -102,7 +107,8 @@ class SegmentData:
             profile_type=self.profile_type,
             rdir=self.rdir_y,
             pitch=self.ypitch,
-            d_tot=self.dtot_y
+            dt_tot=self.dt_tot_y,
+            mp=self.mp_y
         )
 
     def get_zaxis_data(self) -> AxisData:
@@ -116,7 +122,8 @@ class SegmentData:
             profile_type=self.profile_type,
             rdir=self.rdir_z,
             pitch=self.zpitch,
-            d_tot=self.dtot_z
+            dt_tot=self.dt_tot_z,
+            mp=self.mp_z
         )
     
     def get_axis_data(self, axis: str) -> AxisData:
@@ -138,7 +145,8 @@ class SegmentData:
         self.profile_type = axisdata.profile_type
         self.rdir_x = axisdata.rdir
         self.xpitch = axisdata.pitch
-        self.dtot_x = axisdata.d_tot
+        self.dt_tot_x = axisdata.dt_tot
+        self.mp_x = axisdata.mp
     
     def set_yaxis_data(self, axisdata: AxisData) -> None:
         self.dtheta_y = axisdata.dtheta
@@ -150,8 +158,9 @@ class SegmentData:
         self.profile_type = axisdata.profile_type
         self.rdir_y = axisdata.rdir
         self.ypitch = axisdata.pitch
-        self.dtot_y = axisdata.d_tot
-    
+        self.dt_tot_y = axisdata.dt_tot
+        self.mp_y = axisdata.mp
+        
     def set_zaxis_data(self, axisdata: AxisData) -> None:
         self.dtheta_z = axisdata.dtheta
         self.theta_zi = axisdata.theta_i
@@ -162,8 +171,9 @@ class SegmentData:
         self.profile_type = axisdata.profile_type
         self.rdir_z = axisdata.rdir
         self.zpitch = axisdata.pitch
-        self.dtot_z = axisdata.d_tot
-    
+        self.dt_tot_z = axisdata.dt_tot
+        self.mp_z = axisdata.mp
+        
     def set_axis_data(self, axis: str, axisdata: AxisData) -> None:
         if axis == "x":
             self.set_xaxis_data(axisdata)
@@ -195,18 +205,15 @@ class Segment:
     ----------
     point_pair:
         The start and endpoint of the segment.
+    segmentdata:
+        `SegmentData` object created by the `TrajectoryPlanner` holding the data 
+        used to create the `Segment` object.
     mp_x:
         Motion profile of the X-axis motor rotation.
     mp_y:
         Motion profile of the Y-axis motor rotation.
     mp_z:
         Motion profile of the Z-axis motor rotation.
-    rdir_x:
-        Rotation direction of the X-axis motor.
-    rdir_y:
-        Rotation direction of the Y-axis motor.
-    rdir_z:
-        Rotation direction of the Z-axis motor.
     position_profiles:
         Position profiles of the axes.
     velocity_profiles:
@@ -220,29 +227,18 @@ class Segment:
         Step signal to drive the Y-axis stepper motor.
     delays_z:
         Step signal to drive the Z-axis stepper motor.
-    xpitch:
-        Pitch of the X-axis lead screw.
-    ypitch:
-        Pitch of the Y-axis lead screw.
-    zpitch:
-        Pitch of the Z-axis lead screw.
     """
     point_pair: TPointPair = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+    segmentdata: SegmentData | None = None
     mp_x: MotionProfile | None = None
     mp_y: MotionProfile | None = None
     mp_z: MotionProfile | None = None
-    rdir_x: RotationDirection = RotationDirection.COUNTERCLOCKWISE
-    rdir_y: RotationDirection = RotationDirection.COUNTERCLOCKWISE
-    rdir_z: RotationDirection = RotationDirection.COUNTERCLOCKWISE
     position_profiles: tuple[TProfile, ...] | None = None
     velocity_profiles: tuple[TProfile, ...] | None = None
     acceleration_profiles: tuple[TProfile, ...] | None = None
     delays_x: list[float] = field(default_factory=list)
     delays_y: list[float] = field(default_factory=list)
     delays_z: list[float] = field(default_factory=list)
-    xpitch: float = 0.0
-    ypitch: float = 0.0
-    zpitch: float = 0.0
     path_deviation: float = 0.0
     
     def __str__(self):
@@ -301,12 +297,12 @@ class MotionProcessor:
     generated, if `StepperMotorMock` objects were passed to the constructor of
     `TrajectoryPlanner` object.
     """
-    def __init__(self, parent: 'TrajectoryPlanner' = None) -> None:
+    def __init__(self, planner: 'TrajectoryPlanner' = None) -> None:
         """
         Creates a `MotionProcessor` object. This object is internally created
         in a `TrajectoryPlanner` object.
         """
-        self.parent = parent
+        self.planner = planner
         self._segmentdata: SegmentData | None = None
         self._mp_x: MotionProfile | None = None
         self._mp_y: MotionProfile | None = None
@@ -317,26 +313,25 @@ class MotionProcessor:
         self._x_delays: list[float] | None = None
         self._y_delays: list[float] | None = None
         self._z_delays: list[float] | None = None
-        if self.parent is not None:
-            if self.parent.x_motor is not None:
+        if self.planner is not None:
+            if self.planner.x_motor is not None:
                 # noinspection PyTypeChecker
-                self._x_rotator = TwoStageProfileRotator(self.parent.x_motor)
-            if self.parent.y_motor is not None:
+                self._x_rotator = TwoStageProfileRotator(self.planner.x_motor)
+            if self.planner.y_motor is not None:
                 # noinspection PyTypeChecker
-                self._y_rotator = TwoStageProfileRotator(self.parent.y_motor)
-            if self.parent.z_motor is not None:
+                self._y_rotator = TwoStageProfileRotator(self.planner.y_motor)
+            if self.planner.z_motor is not None:
                 # noinspection PyTypeChecker
-                self._z_rotator = TwoStageProfileRotator(self.parent.z_motor)
-
+                self._z_rotator = TwoStageProfileRotator(self.planner.z_motor)
+    
     def _create_motion_profile(
         self,
         axis: str,
-        dt_tot: float | None = None,
-        v_m: float | None = None
+        dt_tot: float | None = None
     ) -> MotionProfile:
         """
-        Takes the segment data belonging to the given axis and creates a
-        motion profile for that axis.
+        Takes the segment data of the indicated axis and creates a motion 
+        profile for that axis.
         """
         # noinspection PyUnreachableCode
         match axis:
@@ -348,24 +343,22 @@ class MotionProcessor:
                 axisdata = self._segmentdata.get_zaxis_data()
             case _:
                 raise ValueError(f"Invalid axis: {axis}")
-
         mp = axisdata.profile_type(
             ds_tot=axisdata.dtheta,
             a_m=axisdata.alpha_m,
-            v_m=axisdata.omega_m if v_m is None else v_m,
+            v_m=axisdata.omega_m,
             v_i=axisdata.omega_i,
             s_i=axisdata.theta_i,
             v_f=axisdata.omega_f,
             dt_tot=dt_tot
         )
         return mp
-
+   
     def _synchronize_motion_profiles(
-        self,
-        mp_x: MotionProfile,
+        self, 
+        mp_x: MotionProfile, 
         mp_y: MotionProfile,
-        mp_z: MotionProfile,
-        v_m: float | None = None
+        mp_z: MotionProfile
     ) -> tuple[MotionProfile, MotionProfile, MotionProfile]:
         """
         Synchronizes the motion profiles of the X-, Y-, and Z-axis movements.
@@ -403,114 +396,23 @@ class MotionProcessor:
 
         # Recalculate the motion profile of the other moving axes so that their
         # travel time would equal the longest travel time.
-        mp_x = self._create_motion_profile("x", dt_max, v_m) if "x" in moving.keys() else mp_x
-        mp_y = self._create_motion_profile("y", dt_max, v_m) if "y" in moving.keys() else mp_y
-        mp_z = self._create_motion_profile("z", dt_max, v_m) if "z" in moving.keys() else mp_z
+        mp_x = self._create_motion_profile("x", dt_max) if "x" in moving.keys() else mp_x
+        mp_y = self._create_motion_profile("y", dt_max) if "y" in moving.keys() else mp_y
+        mp_z = self._create_motion_profile("z", dt_max) if "z" in moving.keys() else mp_z
         return mp_x, mp_y, mp_z
-
-    def _get_path(
-        self,
-        mp_x: MotionProfile,
-        mp_y: MotionProfile,
-        mp_z: MotionProfile,
-        num_points: int = 100
-    ) -> TSegmentPath:
-        thetax_fn = np.vectorize(mp_x.get_position_time_fn())
-        thetay_fn = np.vectorize(mp_y.get_position_time_fn())
-        thetaz_fn = np.vectorize(mp_z.get_position_time_fn())
-        t_arr = np.linspace(0.0, mp_x.dt_tot, num_points)
-
-        x_arr = thetax_fn(t_arr) / (360.0 * self._segmentdata.xpitch)
-        x0_arr = np.full_like(x_arr, x_arr[0])
-        dx_arr = (x_arr - x0_arr) * self._segmentdata.rdir_x.to_int()
-        x_arr = x0_arr + dx_arr
-
-        y_arr = thetay_fn(t_arr) / (360.0 * self._segmentdata.ypitch)
-        y0_arr = np.full_like(y_arr, y_arr[0])
-        dy_arr = (y_arr - y0_arr) * self._segmentdata.rdir_y.to_int()
-        y_arr = y0_arr + dy_arr
-
-        z_arr = thetaz_fn(t_arr) / (360.0 * self._segmentdata.zpitch)
-        z0_arr = np.full_like(z_arr, z_arr[0])
-        dz_arr = (z_arr - z0_arr) * self._segmentdata.rdir_z.to_int()
-        z_arr = z0_arr + dz_arr
-
-        return x_arr, y_arr, z_arr
-
-    def _get_path_deviation(
-        self,
-        mp_x: MotionProfile,
-        mp_y: MotionProfile,
-        mp_z: MotionProfile,
-        num_points: int = 100
-    ) -> float:
-        x_arr, y_arr, z_arr = self._get_path(mp_x, mp_y, mp_z, num_points)
-
-        # Start- and end points of segment
-        p0 = np.array([x_arr[0], y_arr[0], z_arr[0]])
-        p1 = np.array([x_arr[-1], y_arr[-1], z_arr[-1]])
-        dp = p1 - p0
-        dp_norm_sq = np.dot(dp, dp)
-
-        # Calculate distance to the straight segment line
-        max_dev = 0.0
-        for x, y, z in zip(x_arr, y_arr, z_arr):
-            p = np.array([x, y, z])
-            alpha = np.dot(p - p0, dp) / dp_norm_sq
-            proj = p0 + alpha * dp
-            deviation = np.linalg.norm(p - proj)
-            max_dev = max(max_dev, deviation)
-        return max_dev
-
-    def _calc_motion_profiles(
-        self,
-        v_m: float | None = None
+    
+    def _create_motion_profiles(
+        self
     ) -> tuple[MotionProfile, MotionProfile, MotionProfile]:
-        # Create motion profiles without time constraint.
-        mp_x = self._create_motion_profile("x", v_m=v_m)
-        mp_y = self._create_motion_profile("y", v_m=v_m)
-        mp_z = self._create_motion_profile("z", v_m=v_m)
-
-        # Create motion profiles with time constraint (total travel time equal
-        # to longest travel time).
-        mp_x, mp_y, mp_z = self._synchronize_motion_profiles(mp_x, mp_y, mp_z, v_m)
+        mp_x = self._create_motion_profile("x")
+        mp_y = self._create_motion_profile("y")
+        mp_z = self._create_motion_profile("z")
+        mp_x, mp_y, mp_z = self._synchronize_motion_profiles(mp_x, mp_y, mp_z)
         return mp_x, mp_y, mp_z
-
-    def _optimize_motion_profiles(
-        self,
-        allow_dev: float,
-        num_points: int = 100
-    ) -> tuple[MotionProfile, MotionProfile, MotionProfile]:
-
-        def fn(v_m: float) -> float:
-            try:
-                mp_x, mp_y, mp_z = self._calc_motion_profiles(v_m)
-                dev = self._get_path_deviation(mp_x, mp_y, mp_z, num_points)
-                delta = allow_dev - dev
-                return delta ** 2
-            except:
-                return 1e10
-
-        omega_m = max(
-            self._segmentdata.omega_xm,
-            self._segmentdata.omega_ym,
-            self._segmentdata.omega_zm
-        )
-        result = minimize_scalar(fn, bounds=(1.0, omega_m), method="bounded")
-        if result.success:
-            v_m = result.x
-            mp_x, mp_y, mp_z = self._calc_motion_profiles(v_m)
-            return mp_x, mp_y, mp_z
-        if not result.success:
-            raise ValueError(
-                f"Optimization of velocity profiles failed: "
-                f"{result.message}."
-            )
-        raise ValueError("Optimization of velocity profiles failed.")
-
+    
     def _get_position_profiles(self) -> tuple[TProfile, TProfile, TProfile]:
         
-        def _create_position_profile(mp, pitch, rdir):
+        def create_position_profile(mp, pitch, rdir):
             t_arr, theta_arr = mp.position_profile()
             s_arr = theta_arr / (360.0 * pitch)  # convert axis motor angle back to axis position  
             if rdir == RotationDirection.CLOCKWISE:
@@ -520,17 +422,17 @@ class MotionProcessor:
                 s_arr = s0_arr - ds_arr
             return t_arr, s_arr
         
-        pos_x = _create_position_profile(
+        pos_x = create_position_profile(
             self._mp_x, 
             self._segmentdata.xpitch,
             self._segmentdata.rdir_x
         )
-        pos_y = _create_position_profile(
+        pos_y = create_position_profile(
             self._mp_y,
             self._segmentdata.ypitch,
             self._segmentdata.rdir_y
         )
-        pos_z = _create_position_profile(
+        pos_z = create_position_profile(
             self._mp_z,
             self._segmentdata.zpitch,
             self._segmentdata.rdir_z
@@ -539,24 +441,24 @@ class MotionProcessor:
     
     def _get_velocity_profiles(self) -> tuple[TProfile, TProfile, TProfile]:
         
-        def _create_velocity_profile(mp, pitch, rdir):
+        def create_velocity_profile(mp, pitch, rdir):
             t_arr, omega_arr = mp.velocity_profile()
             v_arr = omega_arr / (360.0 * pitch)
             if rdir == RotationDirection.CLOCKWISE:
                 v_arr *= -1.0
             return t_arr, v_arr
         
-        vel_x = _create_velocity_profile(
+        vel_x = create_velocity_profile(
             self._mp_x,
             self._segmentdata.xpitch,
             self._segmentdata.rdir_x
         )
-        vel_y = _create_velocity_profile(
+        vel_y = create_velocity_profile(
             self._mp_y,
             self._segmentdata.ypitch,
             self._segmentdata.rdir_y
         )
-        vel_z = _create_velocity_profile(
+        vel_z = create_velocity_profile(
             self._mp_z,
             self._segmentdata.zpitch,
             self._segmentdata.rdir_z
@@ -565,20 +467,20 @@ class MotionProcessor:
     
     def _get_acceleration_profiles(self) -> tuple[TProfile, TProfile, TProfile]:
         
-        def _create_acceleration_profile(mp, pitch):
+        def create_acceleration_profile(mp, pitch):
             t_arr, alpha_arr = mp.acceleration_profile()
             a_arr = alpha_arr / (360.0 * pitch)
             return t_arr, a_arr
         
-        acc_x = _create_acceleration_profile(
+        acc_x = create_acceleration_profile(
             self._mp_x,
             self._segmentdata.xpitch
         )
-        acc_y = _create_acceleration_profile(
+        acc_y = create_acceleration_profile(
             self._mp_y,
             self._segmentdata.ypitch
         )
-        acc_z = _create_acceleration_profile(
+        acc_z = create_acceleration_profile(
             self._mp_z,
             self._segmentdata.zpitch
         )
@@ -590,7 +492,7 @@ class MotionProcessor:
         based on the calculated motion profiles for the axes.
         """
         if not all((self._mp_x, self._mp_y, self._mp_z)):
-            self._calc_motion_profiles()
+            self._create_motion_profiles()
         
         if self._x_rotator:
             self._x_rotator.preprocess(self._segmentdata.rdir_x, self._mp_x)
@@ -605,10 +507,8 @@ class MotionProcessor:
             self._z_delays = self._z_rotator.delays
     
     def create_segment(
-        self,
-        segmentdata: SegmentData,
-        optimize: bool = False,
-        allow_dev: float = 1e-3,
+        self, 
+        segmentdata: SegmentData, 
         num_points: int = 100
     ) -> Segment:
         """
@@ -617,35 +517,22 @@ class MotionProcessor:
         the stepper motors in the segment.
         """
         self._segmentdata = segmentdata
-
-        # Create motion profiles for the axes in the segment.
-        if not optimize:
-            self._mp_x, self._mp_y, self._mp_z = self._calc_motion_profiles()
-        else:
-            self._mp_x, self._mp_y, self._mp_z = self._optimize_motion_profiles(allow_dev, num_points)
-
-        # Create the stepper driver signals.
+        self._mp_x, self._mp_y, self._mp_z = self._create_motion_profiles()
         self._calc_delays()
 
-        # Create the `Segment` object.
         segment = Segment()
+        segment.segmentdata = self._segmentdata
         segment.point_pair = self._segmentdata.point_pair
         if self._mp_x: segment.mp_x = self._mp_x
         if self._mp_y: segment.mp_y = self._mp_y
         if self._mp_z: segment.mp_z = self._mp_z
-        segment.rdir_x = segmentdata.rdir_x
-        segment.rdir_y = segmentdata.rdir_y
-        segment.rdir_z = segmentdata.rdir_z
         segment.position_profiles = self._get_position_profiles()
         segment.velocity_profiles = self._get_velocity_profiles()
         segment.acceleration_profiles = self._get_acceleration_profiles()
         if self._x_delays: segment.delays_x = self._x_delays
         if self._y_delays: segment.delays_y = self._y_delays
         if self._z_delays: segment.delays_z = self._z_delays
-        segment.xpitch = self._segmentdata.xpitch
-        segment.ypitch = self._segmentdata.ypitch
-        segment.zpitch = self._segmentdata.zpitch
-        segment.path_deviation = self._get_path_deviation(self._mp_x, self._mp_y, self._mp_z)
+        segment.path_deviation = self.planner._get_path_deviation(segment, num_points)
         return segment
 
 
@@ -969,7 +856,7 @@ class TrajectoryPlanner:
         theta_zi = 360.0 * self.zpitch * zi
         return theta_xi, theta_yi, theta_zi
     
-    def _create_segmentdata(self, pts: list[TPoint]) -> list[SegmentData]:
+    def _create_segmentdata(self, pts: list[TPoint]) -> None:
         """
         Takes the points that define the segments of the trajectory.
         Assembles and collects the necessary data into `SegmentData` objects
@@ -980,7 +867,7 @@ class TrajectoryPlanner:
         """
         segments = list(zip(pts[:-1], pts[1:]))
         i_max = len(segments) - 1
-        segmentdata_lst = []
+        self._segmentdata_lst = []
         for i, segment in enumerate(segments):
             dtheta, rdir = self._get_angular_displacements(segment)
             theta_i = self._get_initial_angles(segment)
@@ -1003,11 +890,9 @@ class TrajectoryPlanner:
                 segmentdata.omega_xf = 0.0
                 segmentdata.omega_yf = 0.0
                 segmentdata.omega_zf = 0.0
-            segmentdata_lst.append(segmentdata)
-        return segmentdata_lst
+            self._segmentdata_lst.append(segmentdata)
 
-    @staticmethod
-    def _set_zero_velocities(segmentdata_lst: list[SegmentData]) -> None:
+    def _set_zero_velocities(self) -> None:
         """
         Sets the start and end velocity to zero for non-moving axes in every 
         segment of the trajectory. Also sets the end velocity of a moving axis
@@ -1015,11 +900,11 @@ class TrajectoryPlanner:
         next segment. The start velocity of the next segment in the trajectory
         is then also set to zero.
         """
-        i_max = len(segmentdata_lst) - 1
+        i_max = len(self._segmentdata_lst) - 1
         i = 0
-        for segmentdata1 in segmentdata_lst:
+        for segmentdata1 in self._segmentdata_lst:
             if i < i_max:
-                segmentdata2 = segmentdata_lst[i + 1]
+                segmentdata2 = self._segmentdata_lst[i + 1]
                 for ax in ("x", "y", "z"):
                     axisdata1 = segmentdata1.get_axis_data(ax)
                     axisdata2 = segmentdata2.get_axis_data(ax)
@@ -1066,8 +951,7 @@ class TrajectoryPlanner:
         def fn(v: float) -> float:
             try:
                 kwargs = (
-                    {"v_i": v, "v_f": v_other}
-                    if find == "v_i"
+                    {"v_i": v, "v_f": v_other} if find == "v_i"
                     else {"v_i": v_other, "v_f": v}
                 )
                 mp = axisdata.profile_type(
@@ -1083,11 +967,10 @@ class TrajectoryPlanner:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             max_speed = min(axisdata.omega_m, np.sqrt(2 * axisdata.alpha_m * axisdata.dtheta))
-            r = minimize_scalar(fn, bounds=(1.e-6, max_speed), method="bounded")
+            r = minimize_scalar(fn, bounds=(1.0, max_speed), method="bounded")
         if r.success:
             kwargs = (
-                {"v_i": r.x, "v_f": v_other}
-                if find == "v_i"
+                {"v_i": r.x, "v_f": v_other} if find == "v_i"
                 else {"v_i": v_other, "v_f": r.x}
             )
             mp = axisdata.profile_type(
@@ -1098,12 +981,165 @@ class TrajectoryPlanner:
             )
             return mp
         raise ValueError(f"{find} could not be determined")
+    
+    @staticmethod    
+    def _synchronize_motion_profiles(
+        motion_profiles: dict[str, MotionProfile],
+        find: str
+    ) -> dict[str, MotionProfile]:
+        if len(motion_profiles) > 1:
+            # Get the motion profile with the longest travel time and recreate the
+            # motion profile of the other moving axes so that their travel time
+            # becomes equal to the longest travel time (time synchronization)
+            k_ref, mp_ref = max(motion_profiles.items(), key=lambda t: t[1].dt_tot)
+            l = [(k, mp) for k, mp in motion_profiles.items() if mp is not mp_ref]
+            for j, (k, mp) in enumerate(l):
+                if find == "v_i":
+                    mp = type(mp)(
+                        ds_tot=mp.ds_tot,
+                        a_m=mp.a_m,
+                        v_m=mp.v_m,
+                        v_i=None if mp.v_i != 0.0 else 0.0,
+                        # don't use the initial velocity from the previous step, except if 
+                        # it's zero -> allows the initial velocity still to change when
+                        # the synchronized motion profile `mp` is (re)created here.
+                        v_f=mp.v_f,
+                        s_i=mp.s_i,
+                        dt_tot=mp_ref.dt_tot
+                    )
+                if find == "v_f":
+                    mp = type(mp)(
+                        ds_tot=mp.ds_tot,
+                        a_m=mp.a_m,
+                        v_m=mp.v_m,
+                        v_i=mp.v_i,
+                        v_f=None if mp.v_f != 0.0 else 0.0,
+                        s_i=mp.s_i,
+                        dt_tot=mp_ref.dt_tot
+                    )
+                l[j] = (k, mp)
+            l.append((k_ref, mp_ref))
+            for k, mp in l: motion_profiles[k] = mp
+        return motion_profiles
+    
+    def _minimize_segment_profile_time(
+        self,
+        moving_axes: dict[str, AxisData],
+        find: str,
+    ) -> dict[str, MotionProfile]:
+        # For each of the moving axes, create a motion profile that executes the
+        # required displacement in the shortest possible travel time by altering
+        # either the start or the end velocity of the axis movement in the 
+        # segment.
+        motion_profiles: dict[str, MotionProfile] = {}
+        for k, axisdata in moving_axes.items():
+            v_other = axisdata.omega_f if find == "v_i" else axisdata.omega_i
+            mp = self._minimize_axis_profile_time(axisdata, v_other, find)
+            motion_profiles[k] = mp
+        
+        # After the motion profile of each moving axis is created to execute its
+        # own displacement in the shortest possible travel time, we need to 
+        # synchronize these motion profiles so that they all share the same
+        # total travel time equal to the maximum of the individual travel times.
+        motion_profiles = self._synchronize_motion_profiles(motion_profiles, find)
+        return motion_profiles        
+    
+    @staticmethod
+    def __get_path_deviation(
+        moving_axes: dict[str, AxisData],
+        num_points: int = 100
+    ) -> float:
+
+        def get_axis_positions(
+            moving_axes: dict[str, AxisData],
+            num_points: int = 100
+        ) -> list[NDArray[np.float64]]:
+            positions: list[NDArray[np.float64]] = []
+            for axisdata in moving_axes.values():
+                theta_fn = np.vectorize(axisdata.mp.get_position_time_fn())
+                t_arr = np.linspace(0.0, axisdata.mp.dt_tot, num_points)
+                s_arr = theta_fn(t_arr) / (360.0 * axisdata.pitch)
+                s0_arr = np.full_like(s_arr, s_arr[0])
+                ds_arr = (s_arr - s0_arr) * axisdata.rdir.to_int()
+                s_arr = s0_arr + ds_arr
+                positions.append(s_arr)
+            return positions
+        
+        axis_positions = get_axis_positions(moving_axes, num_points)
+        
+        # Start- and end points of segment
+        p0 = np.array([s_arr[0] for s_arr in axis_positions])
+        p1 = np.array([s_arr[-1] for s_arr in axis_positions])
+        dp = p1 - p0
+        dp_norm_sq = np.dot(dp, dp)
+
+        # Calculate distance to the straight segment line
+        point_coords = np.vstack(axis_positions)
+        _, num_cols = point_coords.shape
+        max_dev = 0.0
+        for i in range(num_cols):
+            p = point_coords[:, i]
+            alpha = np.dot(p - p0, dp) / dp_norm_sq
+            proj = p0 + alpha * dp
+            deviation = np.linalg.norm(p - proj)
+            max_dev = max(max_dev, deviation)
+        return max_dev
+    
+    def _get_path_deviation(
+        self, 
+        segment: Segment, 
+        num_points: int = 100
+    ) -> float:    
+        moving_axes: dict[str, AxisData] = {}
+        segmentdata = segment.segmentdata
+        if segmentdata.dtheta_x > 0.0:
+            moving_axes["x"] = segmentdata.get_xaxis_data()
+            moving_axes["x"].mp = segment.mp_x
+        if segmentdata.dtheta_y > 0.0:
+            moving_axes["y"] = segmentdata.get_yaxis_data()
+            moving_axes["y"].mp = segment.mp_y
+        if segmentdata.dtheta_z > 0.0:
+            moving_axes["z"] = segmentdata.get_zaxis_data()
+            moving_axes["z"].mp = segment.mp_z
+        path_deviation = self.__get_path_deviation(moving_axes, num_points)
+        return path_deviation
+    
+    def _minimize_segment_path_deviation(
+        self,
+        moving_axes: dict[str, AxisData],
+        find: str,
+        allowed_path_deviation: float = 1.e-3,
+        num_points: int = 100
+    ) -> dict[str, MotionProfile]:
+
+        def fn(omega_m: float) -> float:
+            try:
+                for axisdata in moving_axes.values(): axisdata.omega_m = omega_m
+                motion_profiles = self._minimize_segment_profile_time(moving_axes, find)
+                for k, mp in motion_profiles.items(): moving_axes[k].mp = mp
+                path_deviation = self.__get_path_deviation(moving_axes, num_points)
+                delta = allowed_path_deviation - path_deviation
+                return delta ** 2
+            except ValueError:
+                return 1e10
+
+        upper_bound = max(self.vx_m, self.vy_m, self.vz_m)
+        result = minimize_scalar(fn, bounds=(1.0, upper_bound), method="bounded")
+        if result.success:
+            for k, axisdata in moving_axes.items():
+                axisdata.omega_m = result.x
+            motion_profiles = self._minimize_segment_profile_time(moving_axes, find)
+            return motion_profiles
+        raise ValueError(f"Optimization of path deviation failed: {result.message}")
 
     def _create_motion_profiles(
         self,
         segmentdata: SegmentData,
-        find: str
-    ) -> list[tuple[str, MotionProfile]]:
+        find: str,
+        optimize: bool = False,
+        allowed_path_deviation: float = 1.e-3,
+        num_points: int = 100
+    ) -> dict[str, MotionProfile]:
         """
         Creates the motion profiles of the moving axes in a segment of the
         trajectory. First, the motion profiles are created to perform their
@@ -1120,61 +1156,39 @@ class TrajectoryPlanner:
         """
         # Seperate any non-moving axes from the moving axes in the segment.
         moving_axes: dict[str, AxisData] = {}
-        non_moving_axes: dict[str, AxisData] = {}
         xaxisdata = segmentdata.get_xaxis_data()
         yaxisdata = segmentdata.get_yaxis_data()
         zaxisdata = segmentdata.get_zaxis_data()
+        
         for t in zip(("x", "y", "z"), (xaxisdata, yaxisdata, zaxisdata)):
             if t[1].dtheta > 0.0:
                 moving_axes[t[0]] = t[1]
-            else:
-                non_moving_axes[t[0]] = t[1]
         
-        # For each of the moving axes, create a motion profile that executes the
-        # required displacement in the shortest possible travel time by altering
-        # either the start or end velocity of the axis movement in the segment.
-        motion_profiles: dict[str, MotionProfile] = {}
-        for k, axd in moving_axes.items():
-            v_other = axd.omega_f if find == "v_i" else axd.omega_i
-            mp = self._minimize_axis_profile_time(axd, v_other, find)
-            motion_profiles[k] = mp
-                
-        # Get the motion profile with the longest travel time and recreate the
-        # motion profile of the other moving axes so that their travel time
-        # becomes equal to the longest travel time (time synchronization)
-        k_ref, mp_ref = max(motion_profiles.items(), key=lambda t: t[1].dt_tot)
-        l = [(k, mp) for k, mp in motion_profiles.items() if mp is not mp_ref]
-        for j, (k, mp) in enumerate(l):
-            if find == "v_i":
-                mp = type(mp)(
-                    ds_tot=mp.ds_tot,
-                    a_m=mp.a_m,
-                    v_m=mp.v_m,
-                    v_i=None if mp.v_i != 0.0 else 0.0,
-                    # don't use the velocity from the previous step, except if 
-                    # it's zero -> allows to still change the velocity when
-                    # the synchronized motion profile `mp` is (re)created.
-                    v_f=mp.v_f,
-                    s_i=mp.s_i,
-                    dt_tot=mp_ref.dt_tot
-                )
-            if find == "v_f":
-                mp = type(mp)(
-                    ds_tot=mp.ds_tot,
-                    a_m=mp.a_m,
-                    v_m=mp.v_m,
-                    v_i=mp.v_i,
-                    v_f=None if mp.v_f != 0.0 else 0.0,
-                    s_i=mp.s_i,
-                    dt_tot=mp_ref.dt_tot
-                )
-            l[j] = (k, mp)
-        l.append((k_ref, mp_ref))
-        return l
+        if len(moving_axes) == 1:
+            k, axisdata = moving_axes.popitem()
+            v_other = axisdata.omega_f if find == "v_i" else axisdata.omega_i
+            motion_profile = self._minimize_axis_profile_time(axisdata, v_other, find)
+            return {k: motion_profile}
+        
+        if optimize:
+            motion_profiles = self._minimize_segment_path_deviation(
+                moving_axes, 
+                find, 
+                allowed_path_deviation, 
+                num_points
+            )
+        else:
+            motion_profiles = self._minimize_segment_profile_time(
+                moving_axes, 
+                find
+            )
+        return motion_profiles
 
     def _set_start_velocities(
         self,
-        segmentdata_lst: list[SegmentData]
+        optimize: bool = False,
+        allowed_path_deviation: float = 1.e-3,
+        num_points: int = 100
     ) -> None:
         """
         Traverses the segments in the trajectory in reversed order (from end to
@@ -1185,17 +1199,20 @@ class TrajectoryPlanner:
         preceding segment.
         This function must be called before `_set_end_velocities()`.
         """
-        i_max = len(segmentdata_lst) - 1
+        i_max = len(self._segmentdata_lst) - 1
         i = i_max
-        for _ in range(len(segmentdata_lst)):
+        for _ in range(len(self._segmentdata_lst)):
             if i > 0:
-                segmentdata1 = segmentdata_lst[i]
-                l = self._create_motion_profiles(
+                segmentdata1 = self._segmentdata_lst[i]
+                motion_profiles1 = self._create_motion_profiles(
                     segmentdata1,
-                    find="v_i"
+                    find="v_i",
+                    optimize=optimize,
+                    allowed_path_deviation=allowed_path_deviation,
+                    num_points=num_points
                 )
-                segmentdata2 = segmentdata_lst[i - 1]
-                for k, mp in l:
+                segmentdata2 = self._segmentdata_lst[i - 1]
+                for k, mp in motion_profiles1.items():
                     v_i = mp.v_i if mp.v_i is not None else mp.v_top
                     # if `mp.v_i` is still None, it means `mp` was synchronized 
                     # in `_create_motion_profiles()`; in that case the start
@@ -1208,12 +1225,14 @@ class TrajectoryPlanner:
                         segmentdata2.omega_yf = v_i
                     if k == "z":
                         segmentdata1.omega_zi = v_i
-                        segmentdata1.omega_zf = v_i
+                        segmentdata2.omega_zf = v_i
             i -= 1
     
     def _set_end_velocities(
         self,
-        segmentdata_lst: list[SegmentData],
+        optimize: bool = False,
+        allowed_path_deviation: float = 1.e-3,
+        num_points: int = 100
     ) -> None:
         """
         Traverses the segments in the trajectory from start to end. Creates
@@ -1224,28 +1243,34 @@ class TrajectoryPlanner:
         `SegmentData` object.
         This function must be called after `_set_start_velocities()`.
         """
-        i_max = len(segmentdata_lst) - 1
-        for i, segmentdata1 in enumerate(segmentdata_lst):
+        i_max = len(self._segmentdata_lst) - 1
+        for i, segmentdata1 in enumerate(self._segmentdata_lst):
             if i < i_max:
-                l = self._create_motion_profiles(
+                motion_profiles1 = self._create_motion_profiles(
                     segmentdata1,
-                    find="v_f"
+                    find="v_f",
+                    optimize=optimize,
+                    allowed_path_deviation=allowed_path_deviation,
+                    num_points=num_points
                 )
-                segmentdata2 = segmentdata_lst[i + 1]
-                for k, mp in l:
+                segmentdata2 = self._segmentdata_lst[i + 1]
+                for k, mp in motion_profiles1.items():
                     v_f = mp.v_f if mp.v_f is not None else mp.v_top
                     if k == "x":
-                        v_f_min = min(segmentdata1.omega_xf, v_f)
+                        v_f_min = min(v_f, segmentdata1.omega_xf)
                         segmentdata1.omega_xf = v_f_min
                         segmentdata2.omega_xi = v_f_min
+                        segmentdata1.omega_xm = mp.v_m
                     if k == "y":
-                        v_f_min = min(segmentdata1.omega_yf, v_f)
+                        v_f_min = min(v_f, segmentdata1.omega_yf)
                         segmentdata1.omega_yf = v_f_min
                         segmentdata2.omega_yi = v_f_min
+                        segmentdata1.omega_ym = mp.v_m
                     if k == "z":
-                        v_f_min = min(segmentdata1.omega_zf, v_f)
+                        v_f_min = min(v_f, segmentdata1.omega_zf)
                         segmentdata1.omega_zf = v_f_min
-                        segmentdata1.omega_zi = v_f_min
+                        segmentdata2.omega_zi = v_f_min
+                        segmentdata1.omega_zm = mp.v_m
 
     def _create_trajectory(
         self,
@@ -1256,22 +1281,19 @@ class TrajectoryPlanner:
         """
         Creates and returns the `Trajectory` object, a list of `Segment` objects.
         """
-        # Calculate the start and end velocities of the axes in each segment of
-        # the trajectory.
-        self._set_start_velocities(self._segmentdata_lst)
-        self._set_end_velocities(self._segmentdata_lst)
-
+        # Calculate optimal start and end velocities of the axes in each segment
+        # of the trajectory.
+        self._set_start_velocities(optimize, allowed_path_deviation, num_points)
+        self._set_end_velocities(optimize, allowed_path_deviation, num_points)
+        
         # Create the `Segment` objects with the final motion profiles and stepper
         # driver signals of each axis in the segments of the trajectory.
         trajectory = Trajectory()
-        for i, segmentdata in enumerate(self._segmentdata_lst):
-            segment = self.motion_processor.create_segment(
-                segmentdata,
-                optimize, allowed_path_deviation, num_points
-            )
+        for segmentdata in self._segmentdata_lst:
+            segment = self.motion_processor.create_segment(segmentdata)
             trajectory.append(segment)
         return trajectory
-
+    
     def get_trajectory(
         self,
         *points: TPoint,
@@ -1286,8 +1308,8 @@ class TrajectoryPlanner:
         num_points = kwargs.get("num_points", 100)
 
         points = self._check_dimension(*points)
-        self._segmentdata_lst = self._create_segmentdata(points)
-        self._set_zero_velocities(self._segmentdata_lst)
+        self._create_segmentdata(points)
+        self._set_zero_velocities()
 
         trajectory = self._create_trajectory(optimize, allowed_path_deviation, num_points)
         return trajectory
@@ -1344,11 +1366,11 @@ class TrajectoryPlanner:
             raise ValueError("No trajectory was created before.")
 
         optimize = kwargs.get("optimize", False)
-        allow_dev = kwargs.get("allow_dev", 1e-3)
+        allowed_path_deviation = kwargs.get("allowed_path_deviation", 1e-3)
         num_points = kwargs.get("num_points", 100)
 
         self._reset_trajectory_kinematics(a_m, v_m)
-        trajectory = self._create_trajectory(optimize, allow_dev, num_points)
+        trajectory = self._create_trajectory(optimize, allowed_path_deviation, num_points)
         return trajectory
 
     def optimize_trajectory(

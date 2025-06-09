@@ -9,6 +9,7 @@ References
 ----------
 Gürocak, H. (2016), Industrial Motion Control, John Wiley & Sons.
 """
+import warnings
 from typing import Callable
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -181,6 +182,7 @@ class MotionProfile(ABC):
         self.s_i = s_i
         self.v_i = v_i
         self.v_f = v_f
+        self.dt_tot = dt_tot if dt_tot is not None else 0.0
         
         # To be calculated:
         self.v_top: float = 0.0
@@ -191,9 +193,12 @@ class MotionProfile(ABC):
         self.dv_f: float = 0.0
         self.ds_i: float = 0.0
         self.ds_f: float = 0.0
-        self.dt_cov: float = 0.0
         self.ds_cov: float = 0.0
-        self.dt_tot: float = 0.0
+        self.dt_cov: float = 0.0
+        if ds_tot == 0.0 and dt_tot is not None:
+            # applies to a non-moving axis: dt_tot and dt_cov indicate the time
+            # the axis remains at rest
+            self.dt_cov = self.dt_tot
 
         if ds_tot > 0.0:
             if dt_tot is None:
@@ -207,7 +212,7 @@ class MotionProfile(ABC):
                 self.v_top = self._calc_v_top1(v_top)
             else:
                 # method 2: with time constraint (for time synchronisation of 
-                # axes)
+                # multiple axes)
                 self.a_top = self.a_m
                 self.v_top = self._calc_v_top2(dt_tot, self.a_top)
                 # self.a_top, self.v_top = self._calc_v_top3(dt_tot)
@@ -221,14 +226,14 @@ class MotionProfile(ABC):
             self.dt_cov = self._calc_dt_cov(self.v_top, self.a_top)
             self.ds_cov = self._calc_ds_cov(self.v_top, self.a_top)
             self.dt_tot = self._calc_dt_tot(self.v_top, self.a_top)
-    
+
     def _calc_dv_i(self, v_top: float) -> float:
         if self.ds_tot == 0.0: return 0.0
-        return round(v_top - self.v_i, 12) if self.v_i is not None else 0.0
+        return round(v_top - self.v_i, 6) if self.v_i is not None else 0.0
     
     def _calc_dv_f(self, v_top: float) -> float:
         if self.ds_tot == 0.0: return 0.0
-        return round(self.v_f - v_top, 12) if self.v_f is not None else 0.0 
+        return round(self.v_f - v_top, 6) if self.v_f is not None else 0.0
     
     def _calc_ds_i(
         self, 
@@ -247,7 +252,7 @@ class MotionProfile(ABC):
                 dv=dv_i,
                 a_top=a_top
             )
-            return float(s_arr[-1])
+            return round(float(s_arr[-1]), 6)
         raise ValueError("ds_i cannot be determined.")
     
     def _calc_ds_f(
@@ -268,7 +273,7 @@ class MotionProfile(ABC):
                 dv=dv_f,
                 a_top=a_top
             )
-            return float(s_arr[-1])
+            return round(float(s_arr[-1]), 6)
         raise ValueError("ds_f cannot be determined.")
     
     def _calc_ds_cov(self, v_top: float, a_top: float) -> float:
@@ -284,7 +289,7 @@ class MotionProfile(ABC):
     def _calc_dt_cov(self, v_top: float, a_top: float) -> float:
         if self.ds_tot == 0.0: return 0.0
         ds_cov = self._calc_ds_cov(v_top, a_top)
-        return ds_cov / v_top
+        return round(ds_cov / v_top, 6)
     
     def _calc_dt_tot(self, v_top: float, a_top: float) -> float:
         dv_i = self._calc_dv_i(v_top)
@@ -323,7 +328,51 @@ class MotionProfile(ABC):
         total travel distance `self.ds_tot` will be finished after `dt_tot` 
         seconds when the acceleration is `a_top`.
         """
-        def fn(v_top: float) -> float:
+
+        def limit_dt_cov() -> float:
+
+            def _f(v_top):
+                dv_i = self._calc_dv_i(v_top)
+                dv_f = self._calc_dv_f(v_top)
+
+                dt_i = self.get_dt_acc(dv_i, a_top)
+                dt_f = self.get_dt_acc(dv_f, a_top)
+                dt_cov = dt_tot - (dt_i + dt_f)
+                return dt_cov
+            
+            try:
+                sol = root_scalar(_f, bracket=(1.0, self.v_m))
+                return sol.root
+            except ValueError:
+                warnings.warn(
+                    "`v_top` for which `dt_cov` = 0 cannot be determined.",
+                    category=UserWarning
+                )
+                return self.v_m
+
+        def limit_ds_cov() -> float:
+
+            def _f(v_top):
+                dv_i = self._calc_dv_i(v_top)
+                dv_f = self._calc_dv_f(v_top)
+                dt_i = self.get_dt_acc(dv_i, self.a_m)
+                dt_f = self.get_dt_acc(dv_f, self.a_m)
+                ds_i = self._calc_ds_i(self.a_m, dv_i, dt_i)
+                ds_f = self._calc_ds_f(v_top, self.a_m, dv_f, dt_f)
+                ds_cov = self.ds_tot - (ds_i + ds_f)
+                return ds_cov
+            
+            try:
+                sol = root_scalar(_f, bracket=(1.0, self.v_m))
+                return sol.root
+            except ValueError:
+                warnings.warn(
+                    "`v_top` for which `ds_cov` = 0 cannot be determined.",
+                    category=UserWarning
+                )
+                return self.v_m
+        
+        def objective(v_top: float) -> float:
             try:
                 dv_i = self._calc_dv_i(v_top)
                 dv_f = self._calc_dv_f(v_top)
@@ -338,17 +387,18 @@ class MotionProfile(ABC):
                 ds_cov1 = self.ds_tot - (ds_i + ds_f)
                 if ds_cov1 < 0.0: raise ValueError
 
-                # the constant-velocity travel distance must also satisfy: 
+                # the constant-velocity travel distance must also satisfy:
                 ds_cov2 = v_top * dt_cov
 
                 dev = ds_cov2 - ds_cov1
                 return dev ** 2
             except ValueError:
                 return 1e10
-
-        res = minimize_scalar(fn, bounds=(1.0, self.v_m), method='bounded')
+        
+        upper_bound = min(limit_dt_cov(), limit_ds_cov()) - 1.e-3
+        res = minimize_scalar(objective, bounds=(1.0, upper_bound), method='bounded')
         if res.success:
-            return res.x
+             return res.x
         raise ValueError("Could not find a suitable top velocity.")
 
     def _calc_v_top3(
@@ -841,7 +891,7 @@ class TrapezoidalProfile(MotionProfile):
 
     @staticmethod
     def get_dt_acc(dv: float, a_top: float) -> float:
-        return round(abs(dv) / a_top, 12)
+        return round(abs(dv) / a_top, 6)
     
     @staticmethod
     def get_dv(a_top: float, dt_acc: float) -> float:
@@ -872,7 +922,7 @@ class SCurvedProfile(MotionProfile):
 
     @staticmethod
     def get_dt_acc(dv: float, a_top: float) -> float:
-        return round(2 * abs(dv) / a_top, 12)
+        return round(2 * abs(dv) / a_top, 6)
 
     @staticmethod
     def get_dv(a_top: float, dt_acc: float) -> float:
