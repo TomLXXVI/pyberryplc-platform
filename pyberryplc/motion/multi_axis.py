@@ -166,14 +166,14 @@ class MotionProfile(ABC):
             Initial position of the axis or motor shaft.
         dt_tot: optional
             Total travel time. When total travel time is specified, a motion
-            profile is tried to be calculated such that the movement with a 
-            total travel distance `ds_tot` is finished after `dt_tot` (seconds).
+            profile is calculated so that the total travel distance `ds_tot` is 
+            covered in `dt_tot` (seconds).
         
-        Units can be chosen freely, must they must be consistent. Usually time
-        units will be seconds. Position (and displacement), velocity, and
-        acceleration are related by their units of length. If time is in seconds 
-        and position in units of mm, then velocity must be in mm/s and 
-        acceleration in mm/s².
+        Units can be chosen freely, must must be consistent. Usually time will 
+        be in seconds. Position (displacement), velocity, and acceleration are 
+        all related by their units of length. If time is in seconds and position
+        is in units of mm, then velocity must be in mm/s, and acceleration in 
+        mm/s².
         """
         # Given by the user:
         self.v_m = v_m
@@ -328,7 +328,6 @@ class MotionProfile(ABC):
         total travel distance `self.ds_tot` will be finished after `dt_tot` 
         seconds when the acceleration is `a_top`.
         """
-
         def limit_dt_cov() -> float:
 
             def _f(v_top):
@@ -406,9 +405,9 @@ class MotionProfile(ABC):
         dt_tot: float
     ) -> tuple[float, float]:
         """
-        Searches a combination for the top velocity `v_top` and top acceleration 
-        `a_top` of a movement for which the required total travel distance 
-        `self.ds_tot` needs to be finished at `dt_tot` seconds. 
+        Searches a combination of top velocity `v_top` and top acceleration 
+        `a_top` for which the required total travel distance `self.ds_tot` is 
+        covered in `dt_tot` seconds. 
         """
         def fn(x: NDArray[np.float64]) -> float:
             try:

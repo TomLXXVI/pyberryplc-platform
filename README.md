@@ -81,9 +81,12 @@ The main modules are `multi_axis.py` and `trajectory.py`.
 and `SCurvedProfile`, enabling you to specify motion profiles for stepper motors.
 
 `trajectory.py` contains everything needed to execute three-dimensional trajectories with three synchronized stepper 
-motors (X, Y and Z axes). The key class is `TrajectoryPlanner`, which takes a series of $(x, y, z)$ points representing 
-the start and end of each trajectory segment. The result is a `Trajectory` object —a list of `Segment` objects, each 
-containing motion profiles and rotation directions for the axes, allowing you to verify profiles before execution.
+motors (X, Y and Z axes) and minimized path deviations. The key class is `TrajectoryPlanner`, which takes a 
+series of $(x, y, z)$ points representing the start and end of each trajectory segment. The result is a `Trajectory` 
+object —a list of `Segment` objects, each containing motion profiles and rotation directions for the axes, allowing you 
+to verify profiles before execution.
+
+![PyBerryPLC trajectories](media/trajectories.png)
 
 ### `hmi`
 
