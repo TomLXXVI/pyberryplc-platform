@@ -24,7 +24,7 @@ class StepperMotorPLC(AbstractPLC):
             name="motor X",
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
-        self.stepper.attach_rotator(RotatorType.PROFILE_THREADED)
+        self.stepper.attach_rotator(RotatorType.MOTION_PROFILE_THREADED)
         
         self._init_flag = False
         

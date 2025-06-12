@@ -28,7 +28,7 @@ class StepperUARTTestPLC(AbstractPLC):
             name="motor X",
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
-        self.stepper.attach_rotator(RotatorType.PROFILE)
+        self.stepper.attach_rotator(RotatorType.MOTION_PROFILE)
         self.stepper.rotator.profile = TrapezoidalProfile(
             ds_tot=180,
             dt_tot=1,

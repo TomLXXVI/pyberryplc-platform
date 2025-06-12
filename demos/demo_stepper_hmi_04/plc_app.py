@@ -8,7 +8,7 @@ from pyberryplc.stepper import (
     TMC2208StepperMotor,
     TMC2208UART,
     PinConfig,
-    TrajectoryProcess
+    SPMCProcess
 )
 
 from config_loader import load_motor_config_toml
@@ -72,7 +72,7 @@ class MotorController:
         if issubclass(self.motor_class, TMC2208StepperMotor) and self.comm_port:
             motor_kwargs["uart"] = TMC2208UART(port=self.comm_port)
                 
-        self._motor_proc = TrajectoryProcess(
+        self._motor_proc = SPMCProcess(
             conn=_motor_proc,
             motor_class=self.motor_class,
             motor_kwargs=motor_kwargs,

@@ -937,7 +937,7 @@ class RotationDirection(StrEnum):
     COUNTERCLOCKWISE = "counterclockwise"
 
     def to_bool(self) -> bool:
-        """Returns True if direction is counterclockwise, False otherwise."""
+        """Returns True for counterclockwise, False for clockwise."""
         return self == RotationDirection.COUNTERCLOCKWISE
 
     def to_int(self) -> int:

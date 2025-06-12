@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from pyberryplc.charts import LineChart
-from pyberryplc.motion.trajectory_new import (
+from pyberryplc.motion.trajectory import (
     Segment, 
     Trajectory, 
     TPointPair, 

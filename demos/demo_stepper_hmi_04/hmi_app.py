@@ -1,3 +1,4 @@
+import warnings
 import io
 import csv
 from functools import partial
@@ -14,6 +15,8 @@ from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory, StepperM
 from pyberryplc.motion.utils import get_pitch
 
 from plc_app import XYMotionPLC
+
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 class XYMotionHMI(AbstractHMI):
@@ -323,8 +326,8 @@ class MotionProfileDialog:
         trajectory_planner = TrajectoryPlanner(
             pitch=get_pitch(1, 0.01),
             profile_type=SCurvedProfile,
-            a_m=360.0,
-            v_m=180.0,
+            a_m=5000.0,
+            v_m=2700.0,
             x_motor=StepperMotorMock(200, 1),
             y_motor=StepperMotorMock(200, 1),
         )
@@ -334,5 +337,11 @@ class MotionProfileDialog:
         # block NiceGui's event loop. Using `asyncio.to_thread(...)` avoids blocking
         # while preserving access to complex return objects (e.g., Trajectory2D),
         # which would not be safely transferable via ProcessPoolExecutor.
-        self.hmi.trajectory = await asyncio.to_thread(trajectory_planner.get_trajectory, *points)
+        self.hmi.trajectory = await asyncio.to_thread(
+            trajectory_planner.get_trajectory, 
+            *points,
+            optimize=True,
+            allowed_path_deviation=1.e-4,
+            num_points=100
+        )
         self.pos, self.vel, self.acc = self.hmi.trajectory.motion_profiles

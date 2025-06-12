@@ -36,11 +36,19 @@ class MemoryVariable:
         Sets the decimal precision for floating point values in case the memory
         variable state is represented by a float. The default precision is 3.
     """
-    curr_state: bool | int | float = 0
-    prev_state: bool | int | float = 0
+    curr_state: bool | int | float = False
+    prev_state: bool | int | float = False
     single_bit: bool = True
     decimal_precision: int = 3
-
+    
+    def __post_init__(self):
+        c1 = isinstance(self.curr_state, float)
+        c2 = isinstance(self.prev_state, float)
+        c3 = isinstance(self.curr_state, int) and self.curr_state not in (0, 1)
+        c4 = isinstance(self.prev_state, int) and self.prev_state not in (0, 1)
+        if c1 or c2 or c3 or c4:
+            self.single_bit = False
+    
     def update(self, value: bool | int | float) -> None:
         """Updates the current state of the variable with parameter `value`.
         Before `value` is assigned to the current state of the variable, the
@@ -59,30 +67,27 @@ class MemoryVariable:
         return False
     
     def activate(self) -> None:
-        """Sets the current state to `True` (1). Only for single bit variables 
-        (attribute `is_binary` must be `True`; if `is_binary` is `False`, a
-        `ValueError` exception is raised).
+        """Sets the current state to `True`. Only valid for single bit 
+        variables.
         """
         if self.single_bit:
-            self.update(1)
+            self.update(True)
         else:
             raise ValueError("Memory variable is not single bit.")
 
     def deactivate(self) -> None:
-        """Sets the current state to `False` (0). Only for single bit variables 
-        (attribute `is_binary` must be `True`; if `is_binary` is `False`, a
-        `ValueError` exception is raised).
+        """Sets the current state to `False`. Only valid for single bit 
+        variables.
         """
         if self.single_bit:
-            self.update(0)
+            self.update(False)
         else:
             raise ValueError("Memory variable is not single bit.")
-        
+    
     @property
     def rising_edge(self) -> bool:
-        """Returns `True` if `prev_state` is 0 and `curr_state` is 1. Only for 
-        single bit variables (attribute `is_binary` must be `True`; if `is_binary` 
-        is `False`, a `ValueError` exception is raised).
+        """Returns `True` if `prev_state` evaluates to `False` and `curr_state` 
+        evaluates to `True`. Only valid for single bit variables.
         """
         if self.single_bit:
             if self.curr_state and not self.prev_state:
@@ -93,9 +98,8 @@ class MemoryVariable:
 
     @property
     def falling_edge(self) -> bool:
-        """Returns `True` if `prev_state` is 1 and `curr_state` is 0. Only for 
-        single bit variables (attribute `is_binary` must be `True`; if `is_binary` 
-        is `False`, a `ValueError` exception is raised).
+        """Returns `True` if `prev_state` evaluates to `False` and `curr_state` 
+        evaluates to `True`. Only valid for single bit variables.
         """
         if self.single_bit:
             if self.prev_state and not self.curr_state:
@@ -254,12 +258,12 @@ class AbstractPLC(ABC):
             )
             self.crash_routine(e)
     
-    def exit(self):
+    def exit(self) -> None:
         """Terminates the PLC scanning loop and invokes `exit_routine()`."""
         self._exit_handler()
     
     @abstractmethod
-    def control_routine(self):
+    def control_routine(self) -> None:
         """Implements the running operation of the PLC-application.
 
         Must be overridden in the PLC application class derived from this class.
@@ -267,7 +271,7 @@ class AbstractPLC(ABC):
         ...
 
     @abstractmethod
-    def exit_routine(self):
+    def exit_routine(self) -> None:
         """Implements the routine that is called when the PLC-application is
         to be stopped, i.e. when the user has pressed the key combination
         <Ctrl-Z> on the keyboard of the PLC (Raspberry Pi).
@@ -277,7 +281,7 @@ class AbstractPLC(ABC):
         ...
 
     @abstractmethod
-    def emergency_routine(self):
+    def emergency_routine(self) -> None:
         """Implements the routine for when an `EmergencyException` has been 
         raised. An `EmergencyException` can be raised anywhere within the
         `control_routine` method to signal an emergency situation for which the

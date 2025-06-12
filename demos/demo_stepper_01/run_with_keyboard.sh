@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # === CONFIGURATION ===
-PROJECT_DIR="/shared/python-projects/pyberryplc-platform/demos/demo_stepper"
+PROJECT_DIR="/shared/python-projects/pyberryplc-platform/demos/demo_stepper_01"
 VENV_PATH="/shared/python-projects/pyberryplc-platform/.venv"
 SCRIPT="stepper_motor06.py"
 
