@@ -65,8 +65,8 @@ in `base.py` (`driver` subpackage), supports these modes. Derived rotator classe
 A specific `Rotator` is attached to a `StepperMotor` instance via the `attach_rotator()` method.
 
 Stepper motors are driven by pulse trains on the STEP pin, with pulse timing calculated internally. For synchronized 
-multi-motor control, use multiprocessing: each motor runs in a separate process. The `process.py` module in the `driver`
-subpackage provides `MotionProfileProcess` (for single motion profiles) and `TrajectoryProcess` (for planar 
+multi-motor control, use multiprocessing: each motor runs in a separate process. The `process.py` module in the `controller`
+subpackage provides `MPMCProcess` (for single motion profiles) and `SPMCProcess` (step pulse motor control for planar 
 trajectories). Communication between motor processes and the PLC (master process) uses a `Pipe` object. Both classes 
 utilize a `TwoStageProfileRotator`, separating pulse train calculation (`preprocess()`) from rotation execution 
 (`rotate()`).
