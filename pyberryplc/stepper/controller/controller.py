@@ -4,7 +4,7 @@ from multiprocessing import Pipe
 import tomllib
 import json
 from pathlib import Path
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 
 from pyberryplc.stepper.driver.base import StepperMotor, PinConfig, TStepperMotor
@@ -257,7 +257,7 @@ class MotionControlStatus:
         return travel_time
 
 
-class XYZMotionController(ABC):
+class XYZMotionController:
     """
     High-level class that can encapsulate three motor controllers 
     (`SPMotorController`) to control simultaneous X-axis, Y-axis, and Z-axis

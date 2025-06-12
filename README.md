@@ -65,11 +65,23 @@ in `base.py` (`driver` subpackage), supports these modes. Derived rotator classe
 A specific `Rotator` is attached to a `StepperMotor` instance via the `attach_rotator()` method.
 
 Stepper motors are driven by pulse trains on the STEP pin, with pulse timing calculated internally. For synchronized 
-multi-motor control, use multiprocessing: each motor runs in a separate process. The `process.py` module in the `controller`
-subpackage provides `MPMCProcess` (for single motion profiles) and `SPMCProcess` (step pulse motor control for planar 
-trajectories). Communication between motor processes and the PLC (master process) uses a `Pipe` object. Both classes 
-utilize a `TwoStageProfileRotator`, separating pulse train calculation (`preprocess()`) from rotation execution 
-(`rotate()`).
+multi-motor control, use multiprocessing: then each motor runs in a separate process. The `process.py` module in the 
+`controller` subpackage provides `MPMCProcess` (motion profile motor control for single motion profiles) and 
+`SPMCProcess` (step pulse motor control for planar trajectories). Communication between motor processes and the master 
+process uses a `Pipe` object. Both classes utilize a `TwoStageProfileRotator`, separating pulse train calculation 
+(`preprocess()`) from rotation execution (`rotate()`). Class `MPMCProcess` preprocesses a motion profile (`MotionProfile`
+object internally), while class `SPMCProcess` expects to receive the step pulse signals directly from the master process.
+
+Class `SPMotorController` in module `controller.py` continues to build upon the `SPMCProcess` allowing to quickly 
+implement a motor control process. 
+This class is then used in class `XYZMotionController` for controlling the TMC2208 stepper motor drivers of one, two, or
+three axes (X, Y, and/or Z) so that 1D-, 2D-, or 3D-trajectories can be executed. The configuration settings of the 
+stepper motors are taken here from a TOML file. An `XYZMotionController` receives a trajectory through a JSON file that 
+contains the step pulse signals and rotation directions of all segments in the trajectory. This JSON file can easily be 
+obtained from a `Trajectory` object created with the `motion` subpackage (see below). 
+Finally, module `controller.py` also contains the class `XYZMotionPLC`, which is derived from the abstract base class
+`AbstractPLC` residing in the `core` subpackage. The `XYZMotionPLC` class incorporates an `XYZMotionController` and is 
+intended to quickly setup any PLC application that needs motion control.
 
 ### `motion`
 
