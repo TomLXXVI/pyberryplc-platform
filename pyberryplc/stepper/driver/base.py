@@ -501,7 +501,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
                     self._next_step_time = now + delay
                 except StopIteration:
                     self._busy = False
-                    self._generator = None
+                    self._generator: DynamicDelayGenerator | None = None
                     break
             time.sleep(0.0005)
         self._end_time = time.perf_counter()

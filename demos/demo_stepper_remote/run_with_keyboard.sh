@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # === CONFIGURATION ===
-PROJECT_DIR="/shared/python-projects/pyberryplc-platform/demos/demo_stepper_02"
+PROJECT_DIR="/shared/python-projects/pyberryplc-platform/demos/demo_stepper_remote"
 VENV_PATH="/shared/python-projects/pyberryplc-platform/.venv"
-SCRIPT="motion_plc.py"
+SCRIPT="main.py"
 
 # === EXECUTION ===
 cd "$PROJECT_DIR" || { echo "Directory not found"; exit 1; }

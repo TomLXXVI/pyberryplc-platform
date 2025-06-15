@@ -41,6 +41,7 @@ class ToggleSwitch:
         c1 = self._button.curr_state != self._button.prev_state
         c2 = self._button.curr_state
         if c1 and c2:
+            # raising edge of button: invert switch state
             self._switch.update(not self._switch.curr_state)
         else:
             self._switch.update(self._switch.curr_state)

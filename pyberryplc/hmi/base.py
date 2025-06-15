@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from logging import Logger
 
-from pyberryplc.core import SharedData, AbstractPLC
+from pyberryplc.core import HMISharedData, AbstractPLC
 
 
 class PLCThreadManager:
@@ -103,7 +103,7 @@ class AbstractHMI(ABC):
         title: str,
         app,
         ui,
-        shared_data: SharedData,
+        shared_data: HMISharedData,
         plc_app: Type[AbstractPLC] | None,
         logger: Logger,
         port: int = 8081,
@@ -115,7 +115,7 @@ class AbstractHMI(ABC):
         ----------
         title : str
             Name for the HMI app.
-        shared_data : SharedData
+        shared_data : HMISharedData
             The shared object for data exchange between PLC and HMI.
         plc_app : AbstractPLC
             PLC application class, i.e. the concrete class inherited from 

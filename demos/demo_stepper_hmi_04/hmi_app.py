@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 
 from pyberryplc.hmi import AbstractHMI
-from pyberryplc.core import SharedData
+from pyberryplc.core import HMISharedData
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.motion.multi_axis import SCurvedProfile
 from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory, StepperMotorMock
@@ -22,21 +22,21 @@ warnings.filterwarnings("ignore", category=UserWarning)
 class XYMotionHMI(AbstractHMI):
     
     def __init__(self, app, ui):
-        self.shared_data = SharedData(
-            hmi_buttons={
+        self.shared_data = HMISharedData(
+            buttons={
                 "start_motion": False,
             },
-            hmi_digital_outputs={
+            digital_outputs={
                 "x_motor_busy": False,
                 "x_motor_ready": False,
                 "y_motor_busy": False,
                 "y_motor_ready": False,
             },
-            hmi_analog_outputs={
+            analog_outputs={
                 "travel_time_x": float('nan'),
                 "travel_time_y": float('nan'),
             },
-            hmi_data={
+            data={
                 "segments": None,
                 "segment_count": 0
             }
@@ -146,16 +146,16 @@ class XYMotionHMI(AbstractHMI):
         if not self.trajectory:
             self.ui.notify("No trajectory to send.", color="red")
             return
-        self.shared_data.hmi_data["segments"] = self.trajectory
-        self.shared_data.hmi_buttons["start_motion"] = True
+        self.shared_data.data["segments"] = self.trajectory
+        self.shared_data.buttons["start_motion"] = True
         self.ui.notify("Trajectory sent to PLC.")
 
     def update_status(self) -> None:
-        x_motor_busy = self.shared_data.hmi_digital_outputs["x_motor_busy"]
-        x_motor_ready = self.shared_data.hmi_digital_outputs["x_motor_ready"]
-        y_motor_busy = self.shared_data.hmi_digital_outputs["y_motor_busy"]
-        y_motor_ready = self.shared_data.hmi_digital_outputs["y_motor_ready"]
-        segment_count = self.shared_data.hmi_data["segment_count"]
+        x_motor_busy = self.shared_data.digital_outputs["x_motor_busy"]
+        x_motor_ready = self.shared_data.digital_outputs["x_motor_ready"]
+        y_motor_busy = self.shared_data.digital_outputs["y_motor_busy"]
+        y_motor_ready = self.shared_data.digital_outputs["y_motor_ready"]
+        segment_count = self.shared_data.data["segment_count"]
         
         segment_status = ""
         if segment_count > 0:

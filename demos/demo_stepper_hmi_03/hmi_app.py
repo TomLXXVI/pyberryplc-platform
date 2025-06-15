@@ -1,7 +1,7 @@
 import math
 
 from pyberryplc.hmi import AbstractHMI, ErrorDialog
-from pyberryplc.core import SharedData
+from pyberryplc.core import HMISharedData
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.motion.multi_axis import TrapezoidalProfile, SCurvedProfile
 from pyberryplc.motion.trajectory import TrajectoryPlanner, StepperMotorMock
@@ -12,19 +12,19 @@ from plc_app import XYMotionPLC
 class XYMotionHMI(AbstractHMI):
     
     def __init__(self, app, ui):
-        self.shared = SharedData(
-            hmi_buttons={"start_motion": False},
-            hmi_data={
+        self.shared = HMISharedData(
+            buttons={"start_motion": False},
+            data={
                 "motion_profile_x": None,
                 "motion_profile_y": None
             },
-            hmi_digital_outputs={
+            digital_outputs={
                 "motor_x_ready": False,
                 "motor_x_busy": False,
                 "motor_y_ready": False,
                 "motor_y_busy": False,
             },
-            hmi_analog_outputs={
+            analog_outputs={
                 "travel_time_x": float('nan'),
                 "travel_time_y": float('nan'),
             }
@@ -111,17 +111,17 @@ class XYMotionHMI(AbstractHMI):
             self.logger.error(msg)
             return
         
-        self.shared.hmi_data["motion_profile_x"] = segment.mp_x
-        self.shared.hmi_data["motion_profile_y"] = segment.mp_y
-        self.shared.hmi_buttons["start_motion"] = True
+        self.shared.data["motion_profile_x"] = segment.mp_x
+        self.shared.data["motion_profile_y"] = segment.mp_y
+        self.shared.buttons["start_motion"] = True
 
     def update_status(self) -> None:
-        motor_x_ready = self.shared.hmi_digital_outputs["motor_x_ready"]
-        motor_y_ready = self.shared.hmi_digital_outputs["motor_y_ready"]
-        motor_x_busy = self.shared.hmi_digital_outputs["motor_x_busy"]
-        motor_y_busy = self.shared.hmi_digital_outputs["motor_y_busy"]
-        travel_time_x = self.shared.hmi_analog_outputs["travel_time_x"]
-        travel_time_y = self.shared.hmi_analog_outputs["travel_time_y"]
+        motor_x_ready = self.shared.digital_outputs["motor_x_ready"]
+        motor_y_ready = self.shared.digital_outputs["motor_y_ready"]
+        motor_x_busy = self.shared.digital_outputs["motor_x_busy"]
+        motor_y_busy = self.shared.digital_outputs["motor_y_busy"]
+        travel_time_x = self.shared.analog_outputs["travel_time_x"]
+        travel_time_y = self.shared.analog_outputs["travel_time_y"]
         
         if motor_x_ready and not motor_x_busy:
             motor_x_status_text = "ready"

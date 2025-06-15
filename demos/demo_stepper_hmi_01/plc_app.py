@@ -1,19 +1,19 @@
 from pyberryplc.core.plc import AbstractPLC
-from pyberryplc.core.shared_data import SharedData
+from pyberryplc.core.memory import HMISharedData
 from pyberryplc.stepper import (
     TMC2208StepperMotor,
     PinConfig,
     TMC2208UART,
     RotatorType,
-    RotationDirection
 )
+from pyberryplc.motion import RotationDirection
 from pyberryplc.motion.single_axis import TrapezoidalProfile
 
 
 class StepperMotorPLC(AbstractPLC):
     
-    def __init__(self, shared_data: SharedData, logger=None):
-        super().__init__(scan_time=0.1, shared_data=shared_data, logger=logger)
+    def __init__(self, hmi_data: HMISharedData, logger=None):
+        super().__init__(scan_time=0.1, hmi_data=hmi_data, logger=logger)
 
         # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(

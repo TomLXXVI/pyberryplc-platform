@@ -12,7 +12,7 @@ from pyberryplc.stepper.driver.tmc2208 import TMC2208StepperMotor
 from pyberryplc.stepper.uart.tmc2208_uart import TMC2208UART
 from pyberryplc.stepper.controller.process import SPMCProcess
 
-from pyberryplc.core import MemoryVariable, CounterUp, AbstractPLC, SharedData
+from pyberryplc.core import MemoryVariable, CounterUp, AbstractPLC, HMISharedData
 from pyberryplc.motion import RotationDirection
 
 
@@ -129,18 +129,19 @@ class SPMotorController:
             self._travel_time.update(travel_time)
             self.logger.info(
                 f"[{self.motor_name}] "
-                f"segment {self.segment_counter.value}: "
+                f"segment {self.segment_counter.value + 1}: "
                 f"travel time {self.motor_name} = "
                 f"{self._travel_time.state:.3f} s"
             )
             if self.segment_counter.value < self.num_segments - 1:
-                # Signal that the motor is ready to accept a next rotation 
-                # command.
+                # Signal that the motor has finished a rotation and is ready to 
+                # accept a new rotation command.
                 self._motor_ready.update(True)
                 self.segment_counter.count_up()
             else:
-                # Signal that all rotations are completed and the motor is no 
-                # longer busy. 
+                # Signal that all rotations are completed (the motor is not
+                # "busy" anymore), but stays ready to accept a new rotation
+                # command.
                 self._motor_ready.update(True)
                 self._motor_busy.update(False)
                 self.segment_counter.reset()
@@ -165,15 +166,16 @@ class SPMotorController:
     @property
     def motor_busy(self) -> bool | int:
         """
-        Indicates if the motor is currently rotating or not.
+        Indicates if the motor has completed the current trajectory, i.e. all of
+        its rotations are done (returns `False`), or not (returns `True`).
         """
         return self._motor_busy.state
     
     @property
     def motor_ready(self) -> bool | int:
         """
-        Indicates if the motor is currently ready to accept a new rotation
-        command or not.
+        Indicates if the motor is ready to accept a new rotation command 
+        (returns `True`) or not (returns `False`).
         """
         return self._motor_ready.state
     
@@ -190,10 +192,11 @@ class SPMotorController:
         rdir: RotationDirection
     ) -> None:
         """
-        Sends the step pulse signal to the `SPMCProcess` to start the next
+        Sends the step pulse signal to the `SPMCProcess` to start a new
         rotation.
         """
-        # If this is the first rotation, turn the motor state to "busy".
+        # If it is the first rotation of the trajectory, turn the motor state 
+        # to "busy".
         if self.segment_counter.value == 0: 
             self._motor_busy.update(True)
         
@@ -435,9 +438,10 @@ class XYZMotionController:
         motion_control_status = MotionControlStatus(**kwargs)
         return motion_control_status
     
-    def load_trajectory(self, filepath: str) -> None:
+    def load_trajectory(self, filepath: str) -> int:
         """
-        Loads a trajectory JSON file from the given filepath. 
+        Loads a trajectory JSON file from the given filepath and returns the
+        number of segments (movements) in the trajectory. 
 
         A trajectory JSON file is created by calling method 
         `save_stepper_driver_signals()` on a `Trajectory` object.
@@ -447,13 +451,16 @@ class XYZMotionController:
         
         # Assign the number of segments in the trajectory to each motor 
         # controller.
+        num_segments = len(self.trajectory)
         for motor_ctrl in self.motor_ctrls:
-            motor_ctrl.num_segments = len(self.trajectory)
+            motor_ctrl.num_segments = num_segments
         
         # Create a generator to iterate on command over the segments in the 
         # trajectory (see method `move()`)
         self.segments = ((i, s) for i, s in enumerate(self.trajectory))
-    
+        
+        return num_segments
+        
     @staticmethod
     def _get_rotation_direction(rdir: str) -> RotationDirection | None:
         match rdir:
@@ -511,14 +518,14 @@ class XYZMotionPLC(AbstractPLC):
     """
     def __init__(
         self, 
-        shared_data: SharedData | None, 
+        hmi_data: HMISharedData | None, 
         logger: logging.Logger,
         motor_config_filepath: str,
     ) -> None:
         """
         Instantiates the PLC application.
         """
-        super().__init__(shared_data=shared_data, logger=logger)
+        super().__init__(hmi_data=hmi_data, logger=logger)
         self.motion_controller = XYZMotionController(self, motor_config_filepath, logger)
         self.motion_control_status: MotionControlStatus | None = None
         self._init_flag = True

@@ -1,6 +1,6 @@
 from logging import Logger
 
-from pyberryplc.core import AbstractPLC, SharedData
+from pyberryplc.core import AbstractPLC, HMISharedData
 from pyberryplc.stepper import (
     TMC2208StepperMotor, 
     PinConfig,
@@ -11,8 +11,8 @@ from pyberryplc.stepper import (
 
 class StepperMotorPLC(AbstractPLC):
     
-    def __init__(self, shared_data: SharedData, logger: Logger):
-        super().__init__(shared_data=shared_data, logger=logger)
+    def __init__(self, hmi_data: HMISharedData, logger: Logger):
+        super().__init__(hmi_data=hmi_data, logger=logger)
 
         # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
@@ -72,7 +72,7 @@ class StepperMotorPLC(AbstractPLC):
         
     def _execute_actions(self):
         if self.X1.rising_edge:
-            self.stepper.rotator.profile = self.shared_data.hmi_data["profile"]
+            self.stepper.rotator.profile = self.shared_data.data["profile"]
             self.stepper.rotator.start()
     
     def control_routine(self):

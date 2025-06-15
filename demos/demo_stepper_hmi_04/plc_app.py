@@ -1,6 +1,6 @@
 from typing import Callable, Type, Any, TypeVar
 from logging import Logger
-from pyberryplc.core import AbstractPLC, SharedData, CounterUp
+from pyberryplc.core import AbstractPLC, HMISharedData, CounterUp
 from pyberryplc.motion.trajectory import Trajectory
 
 from pyberryplc.stepper import (
@@ -111,8 +111,8 @@ class MotorController:
 
 class XYMotionPLC(AbstractPLC):
     
-    def __init__(self, shared_data: SharedData, logger: Logger):
-        super().__init__(shared_data=shared_data, logger=logger)
+    def __init__(self, hmi_data: HMISharedData, logger: Logger):
+        super().__init__(hmi_data=hmi_data, logger=logger)
         self.trajectory: Trajectory | None = None
 
         # Internal markers
@@ -225,7 +225,7 @@ class XYMotionPLC(AbstractPLC):
         
         if self.X1.rising_edge:
             # Get trajectory segments
-            self.trajectory = self.shared_data.hmi_data["segments"]
+            self.trajectory = self.shared_data.data["segments"]
             self.num_segments = len(self.trajectory)
             self.trajectory_ready.update(True)
             self.x_motor_busy.update(True)
@@ -242,7 +242,7 @@ class XYMotionPLC(AbstractPLC):
             self.y_motor_ready.update(False)
             
             segment = self.trajectory[self.segment_counter.value - 1]
-            self.shared_data.hmi_data["segment_count"] = self.segment_counter.value
+            self.shared_data.data["segment_count"] = self.segment_counter.value
             
             self.x_interface.send({
                 "cmd": "start_segment",

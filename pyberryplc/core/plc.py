@@ -3,122 +3,14 @@ import signal
 import logging
 import threading
 import time
-from dataclasses import dataclass
 
 from gpiozero.pins.pigpio import PiFactory
 
 from pyberryplc.utils import EmailNotification
 
 from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
-from .shared_data import SharedData
+from .memory import MemoryVariable, HMISharedData
 from .exceptions import *
-
-
-@dataclass
-class MemoryVariable:
-    """
-    Represents a variable with a memory: the variable holds its current state,
-    but also remembers its previous state (from the previous PLC scan cycle). 
-    This allows for edge detection. 
-    
-    Attributes
-    ----------
-    curr_state: bool | int | float
-        Current state of the variable, i.e., its state in the current PLC
-        scan cycle.
-    prev_state: bool | int | float
-        Previous state of the variable, i.e., its state in the previous PLC
-        scan cycle.
-    single_bit: bool
-        Indicates that the memory variable should be treated as a single bit 
-        variable (its value can be either 0 or 1). Default value is `True`.
-    decimal_precision: int
-        Sets the decimal precision for floating point values in case the memory
-        variable state is represented by a float. The default precision is 3.
-    """
-    curr_state: bool | int | float = False
-    prev_state: bool | int | float = False
-    single_bit: bool = True
-    decimal_precision: int = 3
-    
-    def __post_init__(self):
-        c1 = isinstance(self.curr_state, float)
-        c2 = isinstance(self.prev_state, float)
-        c3 = isinstance(self.curr_state, int) and self.curr_state not in (0, 1)
-        c4 = isinstance(self.prev_state, int) and self.prev_state not in (0, 1)
-        if c1 or c2 or c3 or c4:
-            self.single_bit = False
-    
-    def update(self, value: bool | int | float) -> None:
-        """Updates the current state of the variable with parameter `value`.
-        Before `value` is assigned to the current state of the variable, the
-        preceding current state is stored in attribute `prev_state`.
-        """
-        self.prev_state = self.curr_state
-        self.curr_state = value
-    
-    @property
-    def active(self) -> bool:
-        """Returns `True` if the current state evaluates to `True`, else returns
-        `False`.
-        """
-        if self.curr_state:
-            return True
-        return False
-    
-    def activate(self) -> None:
-        """Sets the current state to `True`. Only valid for single bit 
-        variables.
-        """
-        if self.single_bit:
-            self.update(True)
-        else:
-            raise ValueError("Memory variable is not single bit.")
-
-    def deactivate(self) -> None:
-        """Sets the current state to `False`. Only valid for single bit 
-        variables.
-        """
-        if self.single_bit:
-            self.update(False)
-        else:
-            raise ValueError("Memory variable is not single bit.")
-    
-    @property
-    def rising_edge(self) -> bool:
-        """Returns `True` if `prev_state` evaluates to `False` and `curr_state` 
-        evaluates to `True`. Only valid for single bit variables.
-        """
-        if self.single_bit:
-            if self.curr_state and not self.prev_state:
-                return True
-            return False
-        else:
-            raise ValueError("Memory variable is not single bit.")
-
-    @property
-    def falling_edge(self) -> bool:
-        """Returns `True` if `prev_state` evaluates to `False` and `curr_state` 
-        evaluates to `True`. Only valid for single bit variables.
-        """
-        if self.single_bit:
-            if self.prev_state and not self.curr_state:
-                return True
-            return False
-        else:
-            raise ValueError("Memory variable is not single bit.")
-    
-    @property
-    def state(self) -> bool | int | float:
-        """Returns the current state (value) of the memory variable, i.e. the 
-        state (value) in the current PLC scan cycle. If the state is represented
-        by a float, it will be rounded to the decimal precision specified when
-        the memory variable was instantiated.
-        """
-        if isinstance(self.curr_state, float):
-            return round(self.curr_state, self.decimal_precision)
-        else:
-            return self.curr_state
 
 
 class AbstractPLC(ABC):
@@ -133,12 +25,11 @@ class AbstractPLC(ABC):
     - `exit_routine()`
     - `emergency_routine()`
     - `crash_routine()`
-    
     """
     def __init__(
         self,
         scan_time: float = 0.1,
-        shared_data: SharedData | None = None,
+        hmi_data: HMISharedData | None = None,
         logger: logging.Logger | None = None,
         pin_factory: PiFactory | None = None,
         eml_notification: EmailNotification | None = None
@@ -148,10 +39,13 @@ class AbstractPLC(ABC):
         Parameters
         ----------
         scan_time : float
-            Minimum time of the PLC scan cycle. The default is 0.1 s (100 ms).
-        shared_data : SharedData, optional
-            `SharedData` object that holds inputs from the HMI, outputs to the 
-            HMI, and any other data the HMI may send to the PLC application.
+            Minimum time duration for the PLC scan cycle. The default is 0.1 s 
+            (100 ms).
+        hmi_data : HMISharedData, optional
+            `HMISharedData` object holding HMI inputs (buttons, switches, or 
+            analog inputs) and HMI outputs (digital and analog outputs). Other 
+            kind of data can also be exchanged between the HMI and PLC 
+            application.
         logger : logging.Logger, optional
             Logs messages to inspect what is going on.
         pin_factory:
@@ -172,7 +66,7 @@ class AbstractPLC(ABC):
         also `/utils/log_utils.py`.
         """
         self.scan_time = scan_time
-        self.shared_data = shared_data
+        self.hmi_data = hmi_data
         self.pin_factory = pin_factory
         self._exit: bool = False
         
@@ -202,7 +96,7 @@ class AbstractPLC(ABC):
         self.hmi_input_register: dict[str, MemoryVariable] = {}
         self.hmi_output_register: dict[str, MemoryVariable] = {}
         
-        if shared_data: self._setup_shared_data()
+        if hmi_data: self._setup_hmi_shared_data()
         
         # To terminate program: press Ctrl-Z and method `_exit_handler` will be
         # called which terminates the PLC scanning loop.
@@ -505,36 +399,36 @@ class AbstractPLC(ABC):
         else:
             raise ConfigurationError(f"unknown PWM output `{label}`")
     
-    def _setup_shared_data(self) -> None:
-        """If a `SharedData` object is passed to `AbstractPLC.__init__(), 
-        creates the HMI input and output registers.
+    def _setup_hmi_shared_data(self) -> None:
+        """If a `HMISharedData` object is passed to `AbstractPLC.__init__(), 
+        creates separate HMI input and output registers.
         """
         self.hmi_input_register = {
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
-            for name, init_value in self.shared_data.hmi_buttons.items()
+            for name, init_value in self.hmi_data.buttons.items()
         }
         self.hmi_input_register.update({
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
-            for name, init_value in self.shared_data.hmi_switches.items()
+            for name, init_value in self.hmi_data.switches.items()
         })
         self.hmi_input_register.update({
             name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
-            for name, init_value in self.shared_data.hmi_analog_inputs.items()
+            for name, init_value in self.hmi_data.analog_inputs.items()
         })
         self.hmi_output_register = {
             name: MemoryVariable(curr_state=init_value, prev_state=init_value)
-            for name, init_value in self.shared_data.hmi_digital_outputs.items()
+            for name, init_value in self.hmi_data.digital_outputs.items()
         }
         self.hmi_output_register.update({
             name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
-            for name, init_value in self.shared_data.hmi_analog_outputs.items()
+            for name, init_value in self.hmi_data.analog_outputs.items()
         })
     
     def _read_inputs(self) -> None:
         """Reads all physical inputs (defined in the PLC application) and writes 
         their current states to the PLC input register.
         
-        If an HMI is connected to the PLC application (`shared_data` is not 
+        If an HMI is connected to the PLC application (`hmi_shared_data` is not 
         `None`) also updates the memory variables in the HMI input register
         from the shared data object.
         
@@ -548,30 +442,30 @@ class AbstractPLC(ABC):
         except InternalCommunicationError as error:
             self._int_com_error_handler(error)
         
-        if self.shared_data: self._read_hmi_inputs()
+        if self.hmi_data: self._read_hmi_inputs()
     
     def _read_hmi_inputs(self) -> None:
-        """Reads HMI inputs from `self.shared_data` and updates the HMI input
+        """Reads HMI inputs from `self.hmi_shared_data` and updates the HMI input
         register.
         """
-        for name, value in self.shared_data.hmi_buttons.items():
+        for name, value in self.hmi_data.buttons.items():
             self.hmi_input_register[name].update(value)
             # if an HMI button state has been read into the HMI register of the
-            # PLC always reset this state in `self.shared_data` (i.e. means that
+            # PLC always reset this state in `self.hmi_shared_data` (i.e. means that
             # a button press in the HMI is valid for only one PLC scan cycle).
-            self.shared_data.hmi_buttons[name] = False
+            self.hmi_data.buttons[name] = False
 
-        for name, value in self.shared_data.hmi_switches.items():
+        for name, value in self.hmi_data.switches.items():
             self.hmi_input_register[name].update(value)
 
-        for name, value in self.shared_data.hmi_analog_inputs.items():
+        for name, value in self.hmi_data.analog_inputs.items():
             self.hmi_input_register[name].update(value)
     
     def _write_outputs(self) -> None:
         """Writes all current states in the PLC output register to the 
         corresponding physical outputs.
         
-        If an HMI is connected to the PLC application (`shared_data` is not 
+        If an HMI is connected to the PLC application (`hmi_shared_data` is not 
         `None`) writes the current states in the HMI output register to
         the shared data object.
         
@@ -585,17 +479,17 @@ class AbstractPLC(ABC):
         except InternalCommunicationError as error:
             self._int_com_error_handler(error)
         
-        if self.shared_data: self._write_hmi_outputs()
+        if self.hmi_data: self._write_hmi_outputs()
     
     def _write_hmi_outputs(self) -> None:
         """Writes the state of the HMI outputs in the PLC HMI output register
-        to `self.shared_data`.
+        to `self.hmi_shared_data`.
         """
         for name, mem_var in self.hmi_output_register.items():
             if mem_var.single_bit:
-                self.shared_data.hmi_digital_outputs[name] = mem_var.curr_state
+                self.hmi_data.digital_outputs[name] = mem_var.curr_state
             else:
-                self.shared_data.hmi_analog_outputs[name] = mem_var.curr_state
+                self.hmi_data.analog_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
         """At the start of each new PLC scan cycle, the values in the "current 
@@ -609,7 +503,7 @@ class AbstractPLC(ABC):
         for output in self.output_register.values():
             output.update(output.curr_state)
         
-        if self.shared_data: self._update_hmi_previous_states()
+        if self.hmi_data: self._update_hmi_previous_states()
     
     def _update_hmi_previous_states(self) -> None:
         """At the start of each new PLC scan cycle, the current states of HMI 

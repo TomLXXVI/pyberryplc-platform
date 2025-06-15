@@ -1,3 +1,7 @@
+"""
+Small test script to test operation of the UART interface of the TMC2208
+stepper motor driver. 
+"""
 import logging
 
 from pyberryplc.utils.log_utils import init_logger

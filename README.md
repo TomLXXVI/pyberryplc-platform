@@ -70,7 +70,7 @@ multi-motor control, use multiprocessing: then each motor runs in a separate pro
 `SPMCProcess` (step pulse motor control for planar trajectories). Communication between motor processes and the master 
 process uses a `Pipe` object. Both classes utilize a `TwoStageProfileRotator`, separating pulse train calculation 
 (`preprocess()`) from rotation execution (`rotate()`). Class `MPMCProcess` preprocesses a motion profile (`MotionProfile`
-object internally), while class `SPMCProcess` expects to receive the step pulse signals directly from the master process.
+object) internally, while class `SPMCProcess` expects to receive step pulse signals directly from the master process.
 
 Class `SPMotorController` in module `controller.py` continues to build upon the `SPMCProcess` allowing to quickly 
 implement a motor control process. 

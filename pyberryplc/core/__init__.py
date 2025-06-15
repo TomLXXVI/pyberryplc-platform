@@ -5,18 +5,20 @@ This module exposes base classes and utilities for digital I/O, timers,
 counters, switches, and the main PLC execution engine.
 """
 
-from pyberryplc.core.plc import AbstractPLC, MemoryVariable
-from pyberryplc.core.shared_data import SharedData
+from pyberryplc.core.plc import AbstractPLC
+from pyberryplc.core.memory import MemoryVariable, HMISharedData, SharedMemoryBlock
 from pyberryplc.core.gpio import DigitalInput, DigitalOutput, PWMOutput, DigitalOutputPigpio
 from pyberryplc.core.timers import TimerSingleScan, TimerOnDelay, TimerOffDelay
 from pyberryplc.core.counters import CounterUp, CounterDown, CounterUpDown
 from pyberryplc.core.switches import ToggleSwitch
 from pyberryplc.core.exceptions import InternalCommunicationError, ConfigurationError, EmergencyException
 
+
 __all__ = [
     "AbstractPLC",
     "MemoryVariable",
-    "SharedData",
+    "HMISharedData",
+    "SharedMemoryBlock",
     "DigitalInput",
     "DigitalOutput",
     "PWMOutput",

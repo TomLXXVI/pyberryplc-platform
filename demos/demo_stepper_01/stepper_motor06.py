@@ -1,20 +1,19 @@
 """
-Test script for dynamic motion profile using DynamicDelayGenerator and SFC-style
-PLC logic.
-Control via keyboard input:
-- Press 's' to start motion.
-- Press 'r' to stop (trigger deceleration).
+Demo on how to use the `TMC2208StepperMotor` class. This demo is similar to 
+`stepper_motor04.py`. However, it demonstrates the use of a dynamic motion
+profile rotator (`RotatorType.DYNAMIC_THREADED`). The rotation of the stepper
+motor is started by a keypress ('s'). The stepper motor continues to rotate 
+until the stop key is pressed ('r').
 """
-
 import os
 from pyberryplc.core.plc import AbstractPLC
 from pyberryplc.stepper import (
     TMC2208StepperMotor, 
     PinConfig,
     TMC2208UART,
-    RotatorType,
-    RotationDirection
+    RotatorType
 )
+from pyberryplc.motion import RotationDirection
 from pyberryplc.motion.single_axis import TrapezoidalProfile
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput

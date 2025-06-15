@@ -11,6 +11,10 @@ class CounterUp:
     
     def reset(self) -> None:
         self.value = self.preset_value
+    
+    def set(self, preset_val: int) -> None:
+        self.preset_value = preset_val
+        self.value = preset_val
 
 
 class CounterDown:
@@ -25,6 +29,10 @@ class CounterDown:
     
     def reset(self) -> None:
         self.value = self.preset_value
+    
+    def set(self, preset_val: int) -> None:
+        self.preset_value = preset_val
+        self.value = preset_val
 
 
 class CounterUpDown:
@@ -42,3 +50,7 @@ class CounterUpDown:
     
     def reset(self) -> None:
         self.value = self.preset_value
+    
+    def set(self, preset_val: int) -> None:
+        self.preset_value = preset_val
+        self.value = preset_val

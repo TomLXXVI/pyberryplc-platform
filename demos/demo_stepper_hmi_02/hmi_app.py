@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 
 from pyberryplc.hmi import AbstractHMI
-from pyberryplc.core import SharedData
+from pyberryplc.core import HMISharedData
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.motion.single_axis import TrapezoidalProfile, SCurvedProfile
 
@@ -12,10 +12,10 @@ class StepperHMI(AbstractHMI):
     
     def __init__(self, app, ui):
         # Define the data that will be shared between PLC and HMI.
-        shared_data = SharedData(
-            hmi_buttons={"start_motion": False},
-            hmi_data={"profile": None},
-            hmi_digital_outputs={"motor_busy": False}
+        shared_data = HMISharedData(
+            buttons={"start_motion": False},
+            data={"profile": None},
+            digital_outputs={"motor_busy": False}
         )
         
         # GUI-widgets that need a reference.
@@ -96,8 +96,8 @@ class StepperHMI(AbstractHMI):
     
     def _start_motion(self) -> None:
         # Send data to PLC
-        self.shared_data.hmi_data["profile"] = self.motion_profile
-        self.shared_data.hmi_buttons["start_motion"] = True
+        self.shared_data.data["profile"] = self.motion_profile
+        self.shared_data.buttons["start_motion"] = True
         
         # Info to the HMI operator            
         self.logger.info(f"Motion profile sent.")
@@ -148,5 +148,5 @@ class StepperHMI(AbstractHMI):
         self.plot.update()
     
     def update_status(self) -> None:
-        motor_busy = self.shared_data.hmi_digital_outputs["motor_busy"]
+        motor_busy = self.shared_data.digital_outputs["motor_busy"]
         self.status_html.set_content("Motor running" if motor_busy else "Motor stopped")

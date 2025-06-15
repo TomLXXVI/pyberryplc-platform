@@ -1,13 +1,18 @@
+"""
+Demo on how to use the `TMC2208StepperMotor` class. This demo is very similar
+to `stepper_motor04.py`, except that it uses a non-blocking (threaded) motion 
+profile rotator (`RotatorType.MOTION_PROFILE_THREADED`).
+"""
 import os
 from pyberryplc.core import AbstractPLC
 from pyberryplc.stepper import (
     TMC2208StepperMotor, 
     TMC2208UART,
     PinConfig,
-    RotatorType,
-    RotationDirection
+    RotatorType
 )
 from pyberryplc.motion.single_axis import TrapezoidalProfile
+from pyberryplc.motion import RotationDirection
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.utils.keyboard_input import KeyInput
 

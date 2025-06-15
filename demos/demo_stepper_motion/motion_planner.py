@@ -1,8 +1,9 @@
 """
-Demo of how to use the `TrajectorPlanner` class to create the axis motion 
+Demo on how to use the `TrajectorPlanner` class to create the axis motion 
 profiles of line segments that compose a trajectory and to generate the step
 pulse signals for driving the axis stepper motors.
 
+What the demo script does:
 -   A CSV file with the coordinates of the vertices of the trajectory is loaded 
     from file.
 -   The `TrajectoryPlanner` creates and returns a `Trajectory` object. Motion 

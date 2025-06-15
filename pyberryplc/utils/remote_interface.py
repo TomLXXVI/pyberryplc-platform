@@ -14,7 +14,6 @@ class AbstractRemoteDeviceClient(ABC):
     and managing connections to remote devices, regardless of the underlying
     communication protocol (e.g., TCP/IP or serial).
     """
-
     @abstractmethod
     def connect(self) -> None:
         """Establishes a connection to the remote device."""
@@ -48,7 +47,6 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
     Provides connection management, command sending, and response handling
     over a TCP/IP socket with JSON-formatted messages.
     """
-
     def __init__(
         self,
         host: str = 'localhost',
@@ -86,14 +84,18 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         self.stream: socket.SocketIO | None = None
 
     def connect(self) -> None:
-        """Establishes a TCP connection to the remote device with retry logic."""
+        """
+        Establishes a TCP connection to the remote device with retry logic.
+        """
         attempt = 0
         while attempt < self.max_retries:
             try:
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socket.settimeout(self.timeout)
                 self.socket.connect((self.host, self.port))
-                self.stream = self.socket.makefile('r')
+                self.stream = self.socket.makefile('r')  
+                # File-like object that can be read. Used for receiving the
+                # responses from the remote device.
                 self.socket.settimeout(None)
                 self._log(f"Connected to device at {self.host}:{self.port}")
                 return
@@ -104,13 +106,16 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         raise ConnectionError("Failed to connect to remote device after multiple attempts.")
 
     def send_command(self, command_dict: dict) -> None:
-        """Sends a JSON-encoded command to the remote device."""
-        msg = json.dumps(command_dict) + "\n"
-        self.socket.sendall(msg.encode())
+        """
+        Sends a JSON-encoded command to the remote device.
+        """
+        msg = json.dumps(command_dict) + "\n"  # `\n` indicates the end of a message.
+        self.socket.sendall(msg.encode())  # Convert JSON string to bytes and send it to the remote device.
 
     def wait_for_done(self) -> None:
         """
-        Waits for a response from the remote device.
+        Waits for the response from the remote device after an execution command
+        was sent. 
 
         Expects a JSON message with 'status': 'done' to confirm completion.
         Raises an error if 'status': 'error' or timeout occurs.
@@ -118,25 +123,35 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         start_time = time.time()
         while True:
             if time.time() - start_time > self.timeout:
-                raise TimeoutError("Timed out waiting for response from remote device.")
+                raise TimeoutError(
+                    "Timed out waiting for response from remote device."
+                )
+            # Read a text line from the stream (i.e a string terminated with `\n`).
             line = self.stream.readline()
             if not line:
-                raise ConnectionError("Connection to remote device was closed unexpectedly.")
-            response = json.loads(line)
+                raise ConnectionError(
+                    "Connection to remote device was closed unexpectedly."
+                )
+            # Convert the text line to a dictionary.
+            response = json.loads(line) 
             if response.get("status") == "done":
                 return
             elif response.get("status") == "error":
                 raise RuntimeError(f"Error from remote device: {response.get('message')}")
 
     def shutdown(self) -> None:
-        """Sends a shutdown command to the remote device."""
+        """
+        Sends a shutdown command to the remote device.
+        """
         try:
             self.send_command({"command": "shutdown"})
         except:
             self._log("Failed to send shutdown command.", level=logging.ERROR)
 
     def close(self) -> None:
-        """Closes the TCP socket connection."""
+        """
+        Closes the TCP socket connection.
+        """
         try:
             if self.socket:
                 self.socket.close()
@@ -145,8 +160,11 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         self._log("Connection to remote device closed.")
 
     def _log(self, msg: str, level: int = logging.INFO) -> None:
-        """Logs a message using the configured logger."""
+        """
+        Logs a message using the configured logger.
+        """
         if isinstance(self.logger, logging.Logger):
+            # noinspection PyUnreachableCode
             match level:
                 case logging.DEBUG:
                     self.logger.debug(msg)
@@ -164,7 +182,7 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
 
 class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
     """
-    Remote device client for serial communication using pyserial.
+    Remote device client for serial communication using `pyserial`.
 
     Provides connection management, command sending, and response handling
     over a serial interface using JSON-formatted messages.
@@ -198,7 +216,9 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
         self.ser: serial.Serial | None = None
 
     def connect(self) -> None:
-        """Opens the serial port connection."""
+        """
+        Opens the serial port connection.
+        """
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
             self._log(f"Connected to serial device at {self.port} (baudrate {self.baudrate})")
@@ -206,7 +226,9 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
             raise ConnectionError(f"Failed to open serial port: {e}")
 
     def send_command(self, command_dict: dict) -> None:
-        """Sends a JSON-encoded command to the serial device."""
+        """
+        Sends a JSON-encoded command to the serial device.
+        """
         msg = json.dumps(command_dict) + "\n"
         self.ser.write(msg.encode())
 
@@ -231,14 +253,18 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
                 raise RuntimeError(f"Error from serial device: {response.get('message')}")
 
     def shutdown(self) -> None:
-        """Sends a shutdown command to the serial device."""
+        """
+        Sends a shutdown command to the serial device.
+        """
         try:
             self.send_command({"command": "shutdown"})
         except:
             self._log("Failed to send shutdown command.", level=logging.ERROR)
 
     def close(self) -> None:
-        """Closes the serial port connection."""
+        """
+        Closes the serial port connection.
+        """
         try:
             if self.ser:
                 self.ser.close()
@@ -247,8 +273,11 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
         self._log("Serial connection closed.")
 
     def _log(self, msg: str, level: int = logging.INFO, *args, **kwargs) -> None:
-        """Logs a message using the configured logger."""
+        """
+        Logs a message using the configured logger.
+        """
         if isinstance(self.logger, logging.Logger):
+            # noinspection PyUnreachableCode
             match level:
                 case logging.DEBUG:
                     self.logger.debug(msg, *args, **kwargs)

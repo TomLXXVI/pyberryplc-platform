@@ -81,6 +81,7 @@ class MPMCProcess(multiprocessing.Process):
             return
         
         prepared = False
+        msg: str = ""
         
         # Message loop
         while True:
@@ -215,7 +216,7 @@ class SPMCProcess(multiprocessing.Process):
         """
         Main loop of the motor process. Waits for commands and executes them.
         """
-        # Instantiate stepper motor and rotator.
+        # Instantiate the stepper motor and its rotator.
         motor = self.motor_class(**self.motor_kwargs)
         motor.rotator = TwoStageMotionProfileRotator(motor)
 
@@ -236,6 +237,8 @@ class SPMCProcess(multiprocessing.Process):
             })
             return
         
+        msg: str = ""
+
         # Message loop.
         while True:
             try:

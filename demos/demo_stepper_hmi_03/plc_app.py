@@ -1,7 +1,7 @@
 import logging
 from multiprocessing import Pipe
 
-from pyberryplc.core import AbstractPLC, SharedData
+from pyberryplc.core import AbstractPLC, HMISharedData
 from pyberryplc.stepper import (
     TMC2208StepperMotor,
     PinConfig,
@@ -14,10 +14,10 @@ class XYMotionPLC(AbstractPLC):
 
     def __init__(
         self,
-        shared_data: SharedData,
+        hmi_data: HMISharedData,
         logger: logging.Logger,
     ) -> None:
-        super().__init__(shared_data=shared_data, logger=logger)
+        super().__init__(hmi_data=hmi_data, logger=logger)
 
         # Create pipes for interprocess communication
         self._px_parent, px_child = Pipe()
@@ -162,8 +162,8 @@ class XYMotionPLC(AbstractPLC):
             self.logger.info("Prepare motion profiles")
             self._x_busy = True
             self._y_busy = True
-            mp_x = self.shared_data.hmi_data["motion_profile_x"]
-            mp_y = self.shared_data.hmi_data["motion_profile_y"]
+            mp_x = self.shared_data.data["motion_profile_x"]
+            mp_y = self.shared_data.data["motion_profile_y"]
             
             self._px_parent.send({
                 "cmd": "prepare_profile",
