@@ -3,10 +3,11 @@ import signal
 import logging
 import threading
 import time
+from statistics import mean, stdev
 
 from gpiozero.pins.pigpio import PiFactory
 
-from pyberryplc.utils import EmailNotification
+from pyberryplc.utils.email_notification import EmailNotification
 
 from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
 from .memory import MemoryVariable, HMISharedData
@@ -103,33 +104,86 @@ class AbstractPLC(ABC):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
 
-    def run(self):
-        """Implements the global running operation of the PLC."""
+    def measure_loop_jitter(self, n: int = 100) -> dict | None:
+        """
+        Measures the jitter of the control routine over n scan cycles.
+
+        Returns
+        -------
+        Dict with timing stats.
+        """
+        durations = []
+        t_next = time.perf_counter()
+
+        for _ in range(n):
+            t_start = time.perf_counter()
+            
+            self._update_previous_states()
+            self._read_inputs()
+            try:
+                self.control_routine()  # to be implemented in derived class
+            except EmergencyException:
+                self.logger.warning(
+                    "Emergency stop triggered during jitter measurement."
+                )
+                break
+            finally:
+                self._write_outputs()
+            
+            t_end = time.perf_counter()
+            durations.append(t_end - t_start)
+            
+            t_next += self.scan_time
+            self._wait_until(t_next)
+        
+        if durations:
+            stats = {
+                "mean_duration_ms": round(mean(durations) * 1000, 3),
+                "stdev_ms": round(stdev(durations) * 1000, 3) if len(durations) > 1 else 0.0,
+                "min_ms": round(min(durations) * 1000, 3),
+                "max_ms": round(max(durations) * 1000, 3),
+                "n": n,
+            }
+            self.logger.info(f"[Jitter] {stats}")
+            return stats
+        return None
+    
+    def run(self, measure: bool = False) -> None | dict:
+        """
+        Implements the global running operation of the PLC.
+        
+        If `measure` is `True` variations in PLC scan cycle time are measured
+        and a dict with a few stats is returned and also send to the logger.
+        """
+        durations = []
+        t_next = time.perf_counter()
         try:
             while not self._exit:
-                scan_start = time.time()
-
+                if measure:
+                    t_start = time.perf_counter()
+                
+                self._update_previous_states()
+                self._read_inputs()
+                
                 try:
-                    self._update_previous_states()
-                    self._read_inputs()
-
                     self.control_routine()  # to be implemented in derived class
-
                 except EmergencyException:
                     self.logger.warning(
                         "Emergency stop triggered — invoking emergency routine."
                     )
                     self.emergency_routine()  # to be implemented in derived class
-                    return
-
+                    return None
                 finally:
                     self._write_outputs()
-
-                    scan_finish = time.time()
-                    scan_time = scan_finish - scan_start
-                    if (sleep_time := self.scan_time - scan_time) > 0:
-                        time.sleep(sleep_time)
-
+                                
+                t_next += self.scan_time
+                self._wait_until(t_next)
+                
+                if measure:
+                    t_end = time.perf_counter()
+                    # noinspection PyUnboundLocalVariable
+                    durations.append(t_end - t_start)
+            
             else:
                 # `else` block is only executed when `self._exit` has become 
                 # `True`, not when while-loop is interrupted by 
@@ -151,6 +205,21 @@ class AbstractPLC(ABC):
                 "Unexpected exception occurred — invoking crash routine."
             )
             self.crash_routine(e)
+        
+        if measure and durations:
+            overshoots = sum(d > self.scan_time for d in durations)
+            stats = {
+                "mean_duration_ms": round(mean(durations) * 1000, 3),
+                "stdev_ms": round(stdev(durations) * 1000, 3) if len(durations) > 1 else 0.0,
+                "min_ms": round(min(durations) * 1000, 3),
+                "max_ms": round(max(durations) * 1000, 3),
+                "overshoots": overshoots,
+                "overshoot_pct": round(100 * overshoots / len(durations), 3),
+                "n": len(durations),
+            }
+            self.logger.info(f"[Jitter] {stats}")
+            return stats
+        return None
     
     def exit(self) -> None:
         """Terminates the PLC scanning loop and invokes `exit_routine()`."""
@@ -530,3 +599,28 @@ class AbstractPLC(ABC):
         the PLC application.
         """
         self._exit = True
+    
+    @staticmethod
+    def _wait_until(target_time: float, sleep_threshold: float = 0.002):
+        """
+        Busy-wait loop that waits until the given target time (in seconds, from 
+        time.perf_counter()). It uses a hybrid strategy: sleep lightly when far 
+        from the target, spin actively near the end.
+
+        Parameters
+        ----------
+        target_time: 
+            Absolute target time (not duration!) in seconds.
+        sleep_threshold: 
+            When more than this time remains, the function sleeps briefly.
+        """
+        while True:
+            remaining = target_time - time.perf_counter()
+            if remaining <= 0:
+                break
+            elif remaining > sleep_threshold:
+                time.sleep(0.001)
+            else:
+                # Busy-wait in final critical period
+                while time.perf_counter() < target_time:
+                    pass

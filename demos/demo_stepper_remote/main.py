@@ -41,8 +41,8 @@ class MainPLC(AbstractPLC):
             }
         )
         
-        # Instantiate the PLC program of the loading station and of the 
-        # multi-station machine, and pass them the `SharedMemoryBlock`. 
+        # Instantiate the PLC program of the loading station and multi-station 
+        # machine, and pass them the `SharedMemoryBlock`. 
         self.loadingstation = LoadingStation(init_logger("LOADING-STATION"), self.datablock)
         self.multistation = MultiStationMachine(init_logger("MULTI-STATION"), self.datablock)
         self.thr_loadingstation: threading.Thread | None = None
@@ -143,7 +143,7 @@ def main():
     
     # Instantiate the main PLC program and start it.
     main_plc = MainPLC(logger=init_logger("MAIN"))
-    main_plc.run()
+    main_plc.run(measure=True)
 
 
 if __name__ == '__main__':

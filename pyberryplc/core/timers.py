@@ -29,8 +29,8 @@ class TimerSingleScan:
         elapsed again. 
         """
         if self._t_start is None:
-            self._t_start = time.time()
-        t_curr = time.time()
+            self._t_start = time.perf_counter()
+        t_curr = time.perf_counter()
         dt = t_curr - self._t_start
         if dt >= self.dt:
             self._t_start = None
@@ -58,8 +58,8 @@ class TimerOnDelay:
         To reset the timer, method `reset` must be called.
         """
         if self._t_start is None:
-            self._t_start = time.time()
-        t_curr = time.time()
+            self._t_start = time.perf_counter()
+        t_curr = time.perf_counter()
         dt = t_curr - self._t_start
         if dt >= self.dt:
             return True
@@ -90,8 +90,8 @@ class TimerOffDelay:
         To reset the timer, method `reset` must be called.
         """
         if self._t_start is None:
-            self._t_start = time.time()
-        t_curr = time.time()
+            self._t_start = time.perf_counter()
+        t_curr = time.perf_counter()
         dt = t_curr - self._t_start
         if dt >= self.dt:
             return False
