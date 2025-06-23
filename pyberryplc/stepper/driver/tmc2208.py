@@ -21,7 +21,6 @@ class TMC2208StepperMotor(StepperMotor):
         "1/8": (0, 0),
         "1/16": (1, 1),
     }
-    
     MICROSTEP_UART_CFG: dict[str, int] = {
         "1/256": 0,
         "1/128": 1,
@@ -137,11 +136,23 @@ class TMC2208StepperMotor(StepperMotor):
     def enable(self, high_sensitivity: bool = False) -> None:
         """
         Enables the stepper driver.
-
-        If UART is configured, this method opens the UART connection and
-        configures the driver to accept software microstepping settings
-        and activate current output. Otherwise, it falls back to GPIO-based
-        enabling.
+        
+        If UART is not configured, GPIO-based enabling will be used (through
+        the ENable pin set in the `PinConfig`).
+        
+        If UART is configured, this method opens the UART connection and also
+        configures the driver to accept microstepping settings via UART (see 
+        method `configure_microstepping()`).
+        
+        Parameter `high_sensitivity` only has meaning when using the UART
+        interface to set the current limits of the driver (see method 
+        `set_current_via_uart()`). It is a parameter used in the determination 
+        of the full scale RMS current the driver will pass to the stepper motor 
+        coils when the motor is either running or in stand still holding the 
+        load. More specifically, it sets the full-scale voltage. If 
+        `high_sensitivity` is `True`, the full-scale voltage of the TMC2208 
+        driver is set to 180 mV. The default full-scale voltage 
+        (`high_sensitivity` = False) is 325 mV. 
         """
         if self.uart is not None:
             self._enable_via_uart(high_sensitivity)
@@ -196,15 +207,15 @@ class TMC2208StepperMotor(StepperMotor):
         ihold_delay: int = 8
     ) -> None:
         """
-        Sets motor current digitally via UART using percentages.
-
+        Sets motor current via the UART using percentages.
+                
         Parameters
         ----------
         run_current_pct : float
             Run current as a percentage (0–100).
             To determine a safe `run_current_pct` value in order to limit the 
             motor run current to its rated value, there is a utility-function 
-            `calculate_run_current_pct()` in `/utils/tmc_utils.py`.
+            `calculate_run_current_pct()` in `utils.tmc_utils.py`.
         hold_current_pct : float
             Hold current as a percentage (0–100). This could be a smaller 
             percentage than `run_current_pct`, but will also depend on the

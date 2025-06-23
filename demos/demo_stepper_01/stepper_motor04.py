@@ -65,19 +65,18 @@ class StepperUARTTestPLC(AbstractPLC):
     
     def _init_control(self):
         # Initialization routine runs only once in the first scan cycle of the
-        # PLC program.
+        # PLC program. `self.input_flag` prevents re-initialization in 
+        # subsequent scan cycles
         if self.input_flag:
-            self.input_flag = False  # avoids re-initialization in the next scan cycles
+            self.input_flag = False
             
             # Stepper driver configuration via UART.
             self.stepper.enable(high_sensitivity=True)  # Turn the driver on.
-            
             self.stepper.configure_microstepping(
                 resolution="1/16",
                 ms_pins=None,
                 full_steps_per_rev=200
             )
-            
             self.stepper.set_current_via_uart(
                 run_current_pct=35.0,
                 hold_current_pct=10.0

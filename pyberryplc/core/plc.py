@@ -103,50 +103,6 @@ class AbstractPLC(ABC):
         # called which terminates the PLC scanning loop.
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
-
-    def measure_loop_jitter(self, n: int = 100) -> dict | None:
-        """
-        Measures the jitter of the control routine over n scan cycles.
-
-        Returns
-        -------
-        Dict with timing stats.
-        """
-        durations = []
-        t_next = time.perf_counter()
-
-        for _ in range(n):
-            t_start = time.perf_counter()
-            
-            self._update_previous_states()
-            self._read_inputs()
-            try:
-                self.control_routine()  # to be implemented in derived class
-            except EmergencyException:
-                self.logger.warning(
-                    "Emergency stop triggered during jitter measurement."
-                )
-                break
-            finally:
-                self._write_outputs()
-            
-            t_end = time.perf_counter()
-            durations.append(t_end - t_start)
-            
-            t_next += self.scan_time
-            self._wait_until(t_next)
-        
-        if durations:
-            stats = {
-                "mean_duration_ms": round(mean(durations) * 1000, 3),
-                "stdev_ms": round(stdev(durations) * 1000, 3) if len(durations) > 1 else 0.0,
-                "min_ms": round(min(durations) * 1000, 3),
-                "max_ms": round(max(durations) * 1000, 3),
-                "n": n,
-            }
-            self.logger.info(f"[Jitter] {stats}")
-            return stats
-        return None
     
     def run(self, measure: bool = False) -> None | dict:
         """

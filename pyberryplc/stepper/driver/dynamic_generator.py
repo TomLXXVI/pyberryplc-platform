@@ -44,14 +44,13 @@ class DynamicDelayGenerator:
         called externally to activate the deceleration phase of the motor and 
         stop the motor.
         """
-        self.phase = "decel"
         t0 = self.t                   # start time of the deceleration phase
         s0 = self.s                   # start position of the deceleration phase
         v0 = self._accel_vel_fn(t0)   # initial velocity at the start of the deceleration phase (cruise velocity)
-        
         self._decel_vel_fn = self.profile.get_fin_velocity_time_fn(t0, v0)
         self._decel_time_fn = self.profile.get_fin_time_position_fn(t0, s0, v0)
-
+        self.phase = "decel"
+        
     def next_delay(self) -> float:
         """
         Returns the time delay between the current step pulse and the next

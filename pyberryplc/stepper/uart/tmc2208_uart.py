@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, TypeVar
 import serial
 import time
 import logging
@@ -12,6 +12,8 @@ from .tmc2208_registers import (
     DRVSTATUSRegister,
     IHOLDIRUNRegister
 )
+
+TRegister = TypeVar("TRegister", bound=Register)
 
 
 class TMC2208UART:
@@ -265,9 +267,10 @@ class TMC2208UART:
         # Write the modified `Register` object back to the driver's register
         self.write_register(reg_name, current)
 
-    def read_register(self, reg_name: str) -> Register:
+    def read_register(self, reg_name: str) -> TRegister:
         """
-        Reads the given register and returns an instance of the associated dataclass.
+        Reads the given register and returns an instance of the associated 
+        dataclass.
 
         Parameters
         ----------

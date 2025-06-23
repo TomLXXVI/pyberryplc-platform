@@ -200,7 +200,23 @@ class DRVSTATUSRegister(Register):
     
     @classmethod
     def field_layout(cls) -> dict[str, tuple[int, int]]:
-        pass
+        """
+        Returns the bit-layout of the DRV_STATUS register as a mapping from
+        field names to (bit-position, bit-width).
+        """
+        return {
+            "stst": (31, 1),
+            "olb": (7, 1),
+            "ola": (6, 1),
+            "s2gb": (3, 1),
+            "s2ga": (2, 1),
+            "s2vsb": (5, 1),
+            "s2vsa": (4, 1),
+            "otpw": (0, 1),
+            "ot": (1, 1),
+            "cs_actual": (16, 4),
+            "stealth": (30, 1),
+        }
 
 
 @dataclass

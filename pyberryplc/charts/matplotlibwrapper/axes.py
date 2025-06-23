@@ -24,8 +24,9 @@ class Axis(ABC):
     @abstractmethod
     def format_ticks(self, fmt: str = '%.2f'):
         pass
-        
 
+
+# noinspection PyTypeChecker
 class X1Axis(Axis):
     
     def add_title(self, title: str):
@@ -40,6 +41,7 @@ class X1Axis(Axis):
         self._axes.xaxis.set_major_formatter(FormatStrFormatter(fmt))
 
 
+# noinspection PyTypeChecker
 class Y1Axis(Axis):
 
     def add_title(self, title: str):
@@ -54,6 +56,7 @@ class Y1Axis(Axis):
         self._axes.yaxis.set_major_formatter(FormatStrFormatter(fmt))
 
 
+# noinspection PyTypeChecker
 class X2Axis(Axis):
     
     def __init__(self, axes: Axes):
@@ -79,6 +82,7 @@ class X2Axis(Axis):
         self._twin_axes.xaxis.set_major_formatter(FormatStrFormatter(fmt))
 
 
+# noinspection PyTypeChecker
 class Y2Axis(Axis):
     
     def __init__(self, axes: Axes):

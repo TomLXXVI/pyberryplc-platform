@@ -6,7 +6,7 @@ by one when commanded to move (by pressing the 's' key on the keyboard).
 This demo script is slightly different than the previous demo script 
 `motion_plc_01.py`. Each time a segment movement has finished (e.g. a tool has 
 been brought to a specific location) a different operation is executed (in this
-demo a lamp is turned on for 3 s). 
+demo a different lamp is turned on for 3 s). 
 """
 import os
 import logging

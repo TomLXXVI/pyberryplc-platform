@@ -29,6 +29,7 @@ class Legend:
         )
 
 
+# noinspection PyTypeChecker
 class Chart(ABC):
 
     def __init__(
@@ -169,7 +170,7 @@ class Chart(ABC):
             kwargs['transform'] = self.y1.axes.transAxes
         if isinstance(bbox_props, dict):
             kwargs['bbox'] = bbox_props
-        elif bbox_props is True:
+        elif bbox_props:
             kwargs['bbox'] = {
                 'boxstyle': 'round',
                 'facecolor': 'wheat',
