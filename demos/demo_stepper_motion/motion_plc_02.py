@@ -98,7 +98,7 @@ class MotionPLC(XYZMotionPLC):
             self.C1.reset()
             
         if self.X1.rising_edge:
-            self.num_segments = self.motion_controller.load_trajectory("demo_trajectory.json")
+            self.num_segments = self.motion_controller.load_trajectory("trajectory01.json")
             self.C1.set(self.num_segments)
             self.trajectory_loaded.activate()
         
