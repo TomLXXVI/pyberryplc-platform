@@ -37,6 +37,7 @@ class AxisData:
     omega_i: float
     omega_f: float
     rdir: RotationDirection
+    rdir_pos: RotationDirection
     pitch: float
     dt_tot: float
     mp: MotionProfile | None
@@ -56,6 +57,9 @@ class SegmentData:
     rdir_x: RotationDirection | None
     rdir_y: RotationDirection | None
     rdir_z: RotationDirection | None
+    rdir_pos_x: RotationDirection | None
+    rdir_pos_y: RotationDirection | None
+    rdir_pos_z: RotationDirection | None
     theta_xi: float
     theta_yi: float
     theta_zi: float
@@ -92,6 +96,7 @@ class SegmentData:
             omega_f=self.omega_xf,
             profile_type=self.profile_type,
             rdir=self.rdir_x,
+            rdir_pos=self.rdir_pos_x,
             pitch=self.xpitch,
             dt_tot=self.dt_tot_x,
             mp=self.mp_x
@@ -107,6 +112,7 @@ class SegmentData:
             omega_f=self.omega_yf,
             profile_type=self.profile_type,
             rdir=self.rdir_y,
+            rdir_pos=self.rdir_pos_y,
             pitch=self.ypitch,
             dt_tot=self.dt_tot_y,
             mp=self.mp_y
@@ -122,6 +128,7 @@ class SegmentData:
             omega_f=self.omega_zf,
             profile_type=self.profile_type,
             rdir=self.rdir_z,
+            rdir_pos=self.rdir_pos_z,
             pitch=self.zpitch,
             dt_tot=self.dt_tot_z,
             mp=self.mp_z
@@ -145,6 +152,7 @@ class SegmentData:
         self.omega_xf = axisdata.omega_f
         self.profile_type = axisdata.profile_type
         self.rdir_x = axisdata.rdir
+        self.rdir_pos_x = axisdata.rdir_pos
         self.xpitch = axisdata.pitch
         self.dt_tot_x = axisdata.dt_tot
         self.mp_x = axisdata.mp
@@ -158,6 +166,7 @@ class SegmentData:
         self.omega_yf = axisdata.omega_f
         self.profile_type = axisdata.profile_type
         self.rdir_y = axisdata.rdir
+        self.rdir_pos_y = axisdata.rdir_pos
         self.ypitch = axisdata.pitch
         self.dt_tot_y = axisdata.dt_tot
         self.mp_y = axisdata.mp
@@ -171,6 +180,7 @@ class SegmentData:
         self.omega_zf = axisdata.omega_f
         self.profile_type = axisdata.profile_type
         self.rdir_z = axisdata.rdir
+        self.rdir_pos_z = axisdata.rdir_pos
         self.zpitch = axisdata.pitch
         self.dt_tot_z = axisdata.dt_tot
         self.mp_z = axisdata.mp
@@ -453,10 +463,10 @@ class MotionProcessor:
         Returns the position profiles of the X-, Y-, and Z-axis movements in the
         current segment.
         """
-        def create_position_profile(mp, pitch, rdir):
+        def create_position_profile(mp, pitch, rdir, rdir_pos):
             t_arr, theta_arr = mp.position_profile()
             s_arr = theta_arr / (360.0 * pitch)  # convert axis motor angle back to axis position  
-            if rdir == RotationDirection.CLOCKWISE:
+            if rdir == ~rdir_pos:
                 s0 = s_arr[0]
                 ds_arr = s_arr - s0
                 s0_arr = np.full_like(s_arr, s0)
@@ -466,17 +476,20 @@ class MotionProcessor:
         pos_x = create_position_profile(
             self._mp_x, 
             self._segmentdata.xpitch,
-            self._segmentdata.rdir_x
+            self._segmentdata.rdir_x,
+            self.planner.x_rdir_pos
         )
         pos_y = create_position_profile(
             self._mp_y,
             self._segmentdata.ypitch,
-            self._segmentdata.rdir_y
+            self._segmentdata.rdir_y,
+            self.planner.y_rdir_pos
         )
         pos_z = create_position_profile(
             self._mp_z,
             self._segmentdata.zpitch,
-            self._segmentdata.rdir_z
+            self._segmentdata.rdir_z,
+            self.planner.z_rdir_pos
         )
         return pos_x, pos_y, pos_z
     
@@ -485,27 +498,30 @@ class MotionProcessor:
         Returns the velocity profiles of the X-, Y-, and Z-axis movements in the
         current segment.
         """
-        def create_velocity_profile(mp, pitch, rdir):
+        def create_velocity_profile(mp, pitch, rdir, rdir_pos):
             t_arr, omega_arr = mp.velocity_profile()
             v_arr = omega_arr / (360.0 * pitch)
-            if rdir == RotationDirection.CLOCKWISE:
+            if rdir == ~rdir_pos:
                 v_arr *= -1.0
             return t_arr, v_arr
         
         vel_x = create_velocity_profile(
             self._mp_x,
             self._segmentdata.xpitch,
-            self._segmentdata.rdir_x
+            self._segmentdata.rdir_x,
+            self.planner.x_rdir_pos
         )
         vel_y = create_velocity_profile(
             self._mp_y,
             self._segmentdata.ypitch,
-            self._segmentdata.rdir_y
+            self._segmentdata.rdir_y,
+            self.planner.y_rdir_pos
         )
         vel_z = create_velocity_profile(
             self._mp_z,
             self._segmentdata.zpitch,
-            self._segmentdata.rdir_z
+            self._segmentdata.rdir_z,
+            self.planner.z_rdir_pos
         )
         return vel_x, vel_y, vel_z
     
@@ -855,7 +871,10 @@ class TrajectoryPlanner:
         v_m: float | tuple[float, float, float],
         x_motor: StepperMotorMock | None = None,
         y_motor: StepperMotorMock | None = None,
-        z_motor: StepperMotorMock | None = None
+        z_motor: StepperMotorMock | None = None,
+        x_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE,
+        y_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE,
+        z_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE
     ) -> None:
         """
         Creates a `TrajectoryPlanner` object.
@@ -863,10 +882,10 @@ class TrajectoryPlanner:
         Parameters
         ----------
         pitch:
-            Pitch of the lead screw (i.e. number of revolutions of the screw to
-            move the nut one meter). Converts linear to rotational motion.
+            Pitch of the lead screw (i.e. number of screw revolutions to
+            move the nut one meter).
             If a single float is given, this value is used for all two or three 
-            motion axes. If the axes have different pitches, a tuple (x, y, z) 
+            motion axes. If the axes have a different pitch, a tuple (x, y, z) 
             can be passed.
         profile_type:
             Concrete subclass of `MotionProfile`. Either `TrapzoidalProfile`, or
@@ -887,11 +906,17 @@ class TrajectoryPlanner:
             step signal of the X-axis stepper motor. It holds the number of 
             full steps to make one revolution of the motor shaft 
             (`full_steps_per_rev`) and, in case microstepping is used, the 
-            microstep factor, which is the inverse of the microstep resolution. 
+            microstep factor (i.e. the inverse of the microstep resolution). 
         y_motor: optional
             A mock for the stepper motor of the Y-axis.
         z_motor: optional
             A mock for the stepper motor of the Z-axis.
+        x_rdir_pos: optional
+            Positive rotation direction of the X-axis (default counterclockwise).
+        y_rdir_pos: optional
+            Positive rotation direction of the Y-axis (default counterclockwise).
+        z_rdir_pos: optional
+            Positive rotation direction of the Z-axis (default counterclockwise).
         """
         self.profile_type = profile_type
         if not isinstance(pitch, tuple):
@@ -909,6 +934,9 @@ class TrajectoryPlanner:
         self.x_motor = x_motor
         self.y_motor = y_motor
         self.z_motor = z_motor
+        self.x_rdir_pos = x_rdir_pos
+        self.y_rdir_pos = y_rdir_pos
+        self.z_rdir_pos = z_rdir_pos
         self.motion_processor = MotionProcessor(self)
         self._segmentdata_lst: list[SegmentData] = []
     
@@ -951,17 +979,17 @@ class TrajectoryPlanner:
         dtheta_y = abs(round(360.0 * self.ypitch * dy, 6))
         dtheta_z = abs(round(360.0 * self.zpitch * dz, 6))
         if dx >= 0.0:
-            rdir_x = RotationDirection.COUNTERCLOCKWISE
+            rdir_x = self.x_rdir_pos
         else: 
-            rdir_x = RotationDirection.CLOCKWISE
+            rdir_x = ~self.x_rdir_pos
         if dy >= 0.0:
-            rdir_y = RotationDirection.COUNTERCLOCKWISE
+            rdir_y = self.y_rdir_pos
         else: 
-            rdir_y = RotationDirection.CLOCKWISE
+            rdir_y = ~self.y_rdir_pos
         if dz >= 0.0:
-            rdir_z = RotationDirection.COUNTERCLOCKWISE
+            rdir_z = self.z_rdir_pos
         else: 
-            rdir_z = RotationDirection.CLOCKWISE
+            rdir_z = ~self.z_rdir_pos
         return (dtheta_x, dtheta_y, dtheta_z), (rdir_x, rdir_y, rdir_z)
     
     def _get_initial_angles(self, segment: TPointPair) -> tuple[float, float, float]:
@@ -996,6 +1024,7 @@ class TrajectoryPlanner:
                 point_pair=segment,
                 dtheta_x=dtheta[0], dtheta_y=dtheta[1], dtheta_z=dtheta[2],
                 rdir_x=rdir[0], rdir_y=rdir[1], rdir_z=rdir[2],
+                rdir_pos_x=self.x_rdir_pos, rdir_pos_y=self.y_rdir_pos, rdir_pos_z=self.z_rdir_pos,
                 theta_xi=theta_i[0], theta_yi=theta_i[1], theta_zi=theta_i[2],
                 profile_type=self.profile_type,
                 xpitch = self.xpitch, ypitch = self.ypitch, zpitch = self.zpitch,
@@ -1591,12 +1620,13 @@ class TrajectoryPlanner:
                 consider minimization of the segment path deviation.
             allowed_path_deviation:
                 The allowable (maximum) segment path deviation in linear axis
-                displacement units (this will depend on the units that were used to
-                specify axis pitch, e.g. if pitch is in revs/meter, the deviation
-                is expected to be in meters).
+                displacement units (this will depend on the units that were used
+                to specify axis pitch, e.g. if pitch is in revs/meter, the 
+                deviation is expected to be in meters).
             num_points:
                 The number of points on the segment path that is used for
-                calculating the segment path deviation. The default is 100.
+                calculating the segment path deviation. The default is 100 
+                points.
 
         Returns
         -------

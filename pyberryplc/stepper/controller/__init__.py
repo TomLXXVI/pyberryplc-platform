@@ -5,7 +5,9 @@ from pyberryplc.stepper.controller.process import (
 from pyberryplc.stepper.controller.controller import (
     SPMotorController, 
     XYZMotionController, 
-    XYZMotionPLC
+    XYZMotionPLC,
+    MotionControlStatus,
+    MotorStatus
 )
 
 __all__ = [
@@ -13,5 +15,7 @@ __all__ = [
     "SPMCProcess",
     "SPMotorController",
     "XYZMotionController",
-    "XYZMotionPLC"
+    "XYZMotionPLC",
+    "MotionControlStatus",
+    "MotorStatus"
 ]

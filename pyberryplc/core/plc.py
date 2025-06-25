@@ -1,3 +1,4 @@
+from typing import TypeVar
 from abc import ABC, abstractmethod
 import signal
 import logging
@@ -96,7 +97,6 @@ class AbstractPLC(ABC):
         # application: 
         self.hmi_input_register: dict[str, MemoryVariable] = {}
         self.hmi_output_register: dict[str, MemoryVariable] = {}
-        
         if hmi_data: self._setup_hmi_shared_data()
         
         # To terminate program: press Ctrl-Z and method `_exit_handler` will be
@@ -580,3 +580,6 @@ class AbstractPLC(ABC):
                 # Busy-wait in final critical period
                 while time.perf_counter() < target_time:
                     pass
+
+
+TAbstractPLC = TypeVar("TAbstractPLC", bound=AbstractPLC)

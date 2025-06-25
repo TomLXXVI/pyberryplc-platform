@@ -161,12 +161,14 @@ def get_2Dsegment_path(
 
     x_arr = thetax_fn(t_arr) / (360.0 * segment.segmentdata.xpitch)
     x0_arr = np.full_like(x_arr, x_arr[0])
-    dx_arr = (x_arr - x0_arr) * segment.segmentdata.rdir_x.to_int()
+    mx = -1 if segment.rdir_x == ~segment.segmentdata.rdir_pos_x else 1
+    dx_arr = (x_arr - x0_arr) * mx
     x_arr = x0_arr + dx_arr
 
     y_arr = thetay_fn(t_arr) / (360.0 * segment.segmentdata.ypitch)
     y0_arr = np.full_like(y_arr, y_arr[0])
-    dy_arr = (y_arr - y0_arr) * segment.segmentdata.rdir_y.to_int()
+    my = -1 if segment.rdir_y == ~segment.segmentdata.rdir_pos_y else 1
+    dy_arr = (y_arr - y0_arr) * my
     y_arr = y0_arr + dy_arr
 
     return (x_arr, y_arr), segment.point_pair
@@ -202,17 +204,20 @@ def get_3Dsegment_path(
 
     x_arr = thetax_fn(t_arr) / (360.0 * segment.segmentdata.xpitch)
     x0_arr = np.full_like(x_arr, x_arr[0])
-    dx_arr = (x_arr - x0_arr) * segment.segmentdata.rdir_x.to_int()
+    mx = -1 if segment.rdir_x == ~segment.segmentdata.rdir_pos_x else 1
+    dx_arr = (x_arr - x0_arr) * mx
     x_arr = x0_arr + dx_arr
 
     y_arr = thetay_fn(t_arr) / (360.0 * segment.segmentdata.ypitch)
     y0_arr = np.full_like(y_arr, y_arr[0])
-    dy_arr = (y_arr - y0_arr) * segment.segmentdata.rdir_y.to_int()
+    my = -1 if segment.rdir_y == ~segment.segmentdata.rdir_pos_y else 1
+    dy_arr = (y_arr - y0_arr) * my
     y_arr = y0_arr + dy_arr
 
     z_arr = thetaz_fn(t_arr) / (360.0 * segment.segmentdata.zpitch)
     z0_arr = np.full_like(z_arr, z_arr[0])
-    dz_arr = (z_arr - z0_arr) * segment.segmentdata.rdir_z.to_int()
+    mz = -1 if segment.rdir_z == ~segment.segmentdata.rdir_pos_z else 1
+    dz_arr = (z_arr - z0_arr) * mz
     z_arr = z0_arr + dz_arr
     
     return (x_arr, y_arr, z_arr), segment.point_pair
@@ -424,6 +429,7 @@ def minimize_profile_time(
         omega_i=v_i,
         omega_f=v_f,
         rdir=RotationDirection.COUNTERCLOCKWISE,
+        rdir_pos=RotationDirection.COUNTERCLOCKWISE,
         pitch=0.0,
         dt_tot=0.0,
         mp=None

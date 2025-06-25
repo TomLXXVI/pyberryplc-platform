@@ -1,6 +1,8 @@
 """
+Motion Planning
+---------------
 Demo on how to use the `TrajectorPlanner` class to create the axis motion 
-profiles of line segments that compose a trajectory and to generate the step
+profiles of line segments that compose a trajectory, and to generate the step
 pulse signals for driving the axis stepper motors.
 
 What the demo script does:
@@ -24,7 +26,7 @@ import time
 import pathlib
 
 from pyberryplc.motion.trajectory import TrajectoryPlanner, StepperMotorMock
-from pyberryplc.motion.multi_axis import SCurvedProfile
+from pyberryplc.motion.multi_axis import SCurvedProfile, RotationDirection
 from pyberryplc.charts import LineChart
 from pyberryplc.motion.utils import (
     read_2Dtrajectory_csv,
@@ -40,19 +42,20 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 def main():
     
-    input_path = "/shared/python-projects/pyberryplc-platform/demos/demo_stepper_hmi_04/demo_points_2.csv"
+    input_path = "C:/Users/Tom/pycharm-projects/pyberryplc-platform/demos/demo_stepper_motion/demo_points.csv"
     points = read_2Dtrajectory_csv(input_path)
     points = [(x / 1000, y / 1000) for x, y in points]  # convert mm to m
     
     start = time.time()
 
     planner = TrajectoryPlanner(
-        pitch=100,  # revs/m
+        pitch=250,  # revs/m
         profile_type=SCurvedProfile,
-        a_m=5000.0,  # deg/s2
-        v_m=2700.0,  # deg/s
+        a_m=1000.0,  # deg/s2
+        v_m=360.0,  # deg/s
         x_motor=StepperMotorMock(full_steps_per_rev=200, microstep_factor=1),
-        y_motor=StepperMotorMock(full_steps_per_rev=200, microstep_factor=1)
+        y_motor=StepperMotorMock(full_steps_per_rev=200, microstep_factor=1),
+        y_rdir_pos=RotationDirection.CLOCKWISE
     )
     trajectory = planner.get_trajectory(
         *points, 
@@ -115,8 +118,8 @@ def main():
     print(f"Trajectory duration: {trajectory.duration:.3f} s")
     print()
     
-    output_path = pathlib.Path("/shared/python-projects/pyberryplc-platform/demos/demo_stepper_02")
-    file_name = "demo_trajectory.json"
+    output_path = pathlib.Path("C:/Users/Tom/pycharm-projects/pyberryplc-platform/demos/demo_stepper_motion")
+    file_name = "trajectory01.json"
     trajectory.save_stepper_driver_signals(str(output_path / file_name))
 
 

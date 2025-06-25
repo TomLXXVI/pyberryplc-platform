@@ -14,7 +14,7 @@ from pyberryplc.core.counters import CounterDown
 
 
 class MotionPLC(XYZMotionPLC):
-    
+        
     def __init__(self, logger: logging.Logger):
         super().__init__(
             hmi_data=None,
@@ -24,10 +24,6 @@ class MotionPLC(XYZMotionPLC):
         self.key_input = KeyInput()
         
         self.L1, _ = self.add_digital_output(23, "L1")
-        self.L2, _ = self.add_digital_output(22, "L2")
-        self.L3, _ = self.add_digital_output(24, "L3")
-        self.L4, _ = self.add_digital_output(25, "L4")
-        
         self.T1 = TimerOnDelay(3)
         self.C1 = CounterDown(0)
         

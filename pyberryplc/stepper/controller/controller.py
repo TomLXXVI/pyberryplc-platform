@@ -18,8 +18,8 @@ from pyberryplc.motion import RotationDirection
 
 class SPMotorController:
     """
-    Creates and controls a separate `SPMCProcess` which has a concrete 
-    `StepperMotor` instance inside. A `multiprocessing.Pipe` is used to
+    Creates and controls a separate `SPMCProcess` which holds a concrete 
+    `StepperMotor` instance inside it. A `multiprocessing.Pipe` is used to
     send messages to and receive messages from the `SPMCProcess`. To
     send messages (commands) to the `SPMCProcess` use the `send(...)` method
     of instance attribute `com_interface`.
@@ -87,7 +87,7 @@ class SPMotorController:
         c1 = issubclass(self.motor_class, TMC2208StepperMotor)
         c2 = self.comm_port
         if c1 and c2: motor_kwargs["uart"] = TMC2208UART(port=self.comm_port)
-        self._motor_control_proc = SPMCProcess(
+        self._mc_process = SPMCProcess(
             conn=_spmc_endpoint,
             motor_class=self.motor_class,
             motor_kwargs=motor_kwargs,
@@ -100,7 +100,7 @@ class SPMotorController:
         Starts the `run()` method of the `SPMCProcess`. After this function
         has been called, messages (commands) can be send to the `SPMCProcess`.
         """
-        self._motor_control_proc.start()
+        self._mc_process.start()
         # Signal that the motor is ready to rotate.
         self._motor_ready.update(True)
         
@@ -114,7 +114,7 @@ class SPMotorController:
         """
         Disables or closes the `SPMPProcess` by calling its `join()` method.
         """
-        self._motor_control_proc.join()
+        self._mc_process.join()
     
     def _set_status(self, msg: dict[str, Any]) -> None:
         """
@@ -263,9 +263,9 @@ class MotionControlStatus:
 class XYZMotionController:
     """
     High-level class that can encapsulate three motor controllers 
-    (`SPMotorController`) to control simultaneous X-axis, Y-axis, and Z-axis
+    (`SPMotorController`) to simultaneousely control X-axis, Y-axis, and Z-axis
     motion (3D-motion). The class uses the `TMC2208StepperMotor`. The
-    configuration settings of each `TMC2208StepperMotor` are taken from a 
+    configuration settings for each `TMC2208StepperMotor` are taken from a 
     TOML file.
     """
     def __init__(
@@ -280,7 +280,8 @@ class XYZMotionController:
         Parameters
         ----------
         master:
-            Concrete instance of `AbstractPLC`.
+            Concrete instance of `XYZMotionPLC` that incorporates this 
+            `XYZMotionController` instance.
         config_filepath:
             File path to the TOML-file with the motor configuration settings.
         logger:
@@ -307,7 +308,7 @@ class XYZMotionController:
     
     def _load_motor_configurations(self) -> None:
         """
-        Loads the motor configurations .toml-file and assigns the configuration 
+        Loads the motor configuration TOML file and assigns the configuration 
         of each motor to its own configuration-dict. If a motor is missing, its
         configuration-dict will be set to `None`.
         """
@@ -493,6 +494,7 @@ class XYZMotionController:
     
     def move(self) -> int:
         """
+        Executes a move command.
         Sends the signals for the next segment axis rotations in the trajectory 
         to the motor controllers. Returns the sequence number of the segment in
         the trajectory or -1 when the trajectory is finished.
@@ -511,7 +513,7 @@ class XYZMotionController:
 
 class XYZMotionPLC(AbstractPLC):
     """
-    Extends `AbstractPLC` by incorporating an `XYZMotionController`. The
+    Extends class `AbstractPLC` by incorporating an `XYZMotionController`. The
     motion controller is accessible through attribute `self.motion_controller`.
     To read the current state of the motors controlled by the motion controller,
     access attribute `self.motion_control_status`.
@@ -567,8 +569,8 @@ class XYZMotionPLC(AbstractPLC):
         self._init_control()
         
         # Request the current operating state of the motors at the start 
-        # of the sequential control routine. Returns a `MotionControlStatus`
-        # object.
+        # of the sequential control routine. The current operating state is
+        # accessible through attribute `self.motion_control_status`.
         self.motion_control_status = self.motion_controller.get_status()
         
         # PLC program implementation.

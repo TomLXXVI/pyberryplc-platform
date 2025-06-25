@@ -136,11 +136,11 @@ class SPMCProcess(multiprocessing.Process):
     stepper motor from an external process. This requires or allows that the 
     processing of motion profiles must have been done or can be done in advance.
     
-    A concrete `StepperMotor` instance is created when the process is started.
-    The specific configuration settings of the `StepperMotor` instance are done
-    through a callback-function which must be passed to the constructor of the
-    `SPMCProcess` and which will be called by the `SPMCProcess` when the process
-    is started.
+    A concrete `StepperMotor` instance is only created when the process is 
+    started. The specific configuration settings of the `StepperMotor` instance 
+    are passed using a callback-function which must be passed to the constructor
+    of the `SPMCProcess` and which will be called by the `SPMCProcess` when the 
+    process is started.
     
     Parameters
     ----------
@@ -214,7 +214,8 @@ class SPMCProcess(multiprocessing.Process):
 
     def run(self) -> None:
         """
-        Main loop of the motor process. Waits for commands and executes them.
+        Runs the motor process. First, a motor is instantiated and configured, 
+        then the message loop is entered, waiting for commands to execute.
         """
         # Instantiate the stepper motor and its rotator.
         motor = self.motor_class(**self.motor_kwargs)
@@ -239,7 +240,7 @@ class SPMCProcess(multiprocessing.Process):
         
         msg: str = ""
 
-        # Message loop.
+        # Enter the message loop.
         while True:
             try:
                 msg = self.conn.recv()

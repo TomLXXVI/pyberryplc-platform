@@ -88,8 +88,8 @@ def calculate_rms_current(
 
 class RMSCurrentLogger:
     """
-    Retrieves stepper motor RMS currents from TMC2208 driver via UART and writes
-    them to a CSV file.
+    Retrieves stepper motor RMS currents from a TMC2208 driver via UART and 
+    writes them to a CSV file.
     """
     def __init__(
         self,

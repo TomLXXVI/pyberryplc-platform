@@ -6,6 +6,9 @@ A loading station transfers items to the rotary disk of a multi-station machine.
 The loading machine and the multi-station machine each run their own PLC program.
 The multi-station machine must signal to the loading station when it is ready to
 accept a new item.
+
+Also demonstrates a stepper motor driver running in a separate OS subprocess 
+that communicates with the loading station through a TCP connection. 
 """
 import logging
 import os
@@ -30,7 +33,7 @@ class MainPLC(AbstractPLC):
         self.init_flag = True
         self.key_input = KeyInput()
         
-        # The PLC programs of the different machine-units exhange data with each 
+        # The PLC programs of different machine-units exhange data with each 
         # other through a `SharedMemoryBlock`.
         self.datablock = SharedMemoryBlock(
             name="DB1",
@@ -41,11 +44,12 @@ class MainPLC(AbstractPLC):
             }
         )
         
-        # Instantiate the PLC program of the loading station and multi-station 
+        # Instantiate the PLC program of the loading station and the multi-station 
         # machine, and pass them the `SharedMemoryBlock`. 
         self.loadingstation = LoadingStation(init_logger("LOADING-STATION"), self.datablock)
-        self.multistation = MultiStationMachine(init_logger("MULTI-STATION"), self.datablock)
         self.thr_loadingstation: threading.Thread | None = None
+        
+        self.multistation = MultiStationMachine(init_logger("MULTI-STATION"), self.datablock)
         self.thr_multistation: threading.Thread | None = None
         
         # Create step markers for the program sequence.
@@ -127,7 +131,7 @@ def main():
     # Clear the console screen.
     os.system("clear")
 
-    # A stepper driver is used by the loading station to transfer items from a
+    # A stepper driver is used in the loading station to transfer items from a
     # location POS2 in the loading station to a location POS3. The stepper 
     # driver runs in a completely separate process and communicates with the
     # PLC program of the loading station through a TCP connection.
@@ -136,14 +140,13 @@ def main():
     project_path = "/shared/python-projects/pyberryplc-platform/demos/demo_stepper_remote"
     venv_activate = "/shared/python-projects/pyberryplc-platform/.venv/bin/activate"
     stepper_driver_script = os.path.join(project_path, "stepper_driver.py")
-
     subprocess.Popen(
         ['bash', '-c', f'source {venv_activate} && python {stepper_driver_script}']
     )
     
     # Instantiate the main PLC program and start it.
     main_plc = MainPLC(logger=init_logger("MAIN"))
-    main_plc.run(measure=True)
+    main_plc.run(measure=True)  # indicates that the PLC scan time should be measured
 
 
 if __name__ == '__main__':

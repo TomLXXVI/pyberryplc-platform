@@ -945,12 +945,20 @@ class RotationDirection(StrEnum):
         if self == RotationDirection.CLOCKWISE:
             return -1
         return 1
-
+    
     def __int__(self) -> int:
         return self.to_int()
 
     def __bool__(self) -> bool:
         raise TypeError("Use .to_bool() for explicit conversion.")
+    
+    def __invert__(self) -> 'RotationDirection':
+        if self == RotationDirection.COUNTERCLOCKWISE:
+            return RotationDirection.CLOCKWISE
+        return RotationDirection.COUNTERCLOCKWISE
+    
+    def toggle(self) -> 'RotationDirection':
+        return ~self
 
 
 class MotionProfileType(StrEnum):
