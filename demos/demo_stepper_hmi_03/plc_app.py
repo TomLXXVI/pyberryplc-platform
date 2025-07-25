@@ -43,26 +43,26 @@ class XYMotionPLC(AbstractPLC):
             conn=px_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={
-                "pin_config": PinConfig(step_pin_ID=21, dir_pin_ID=27, use_pigpio=True),
+                "pin_config": PinConfig(step_pin=21, dir_pin=27, use_pigpio=True),
                 "logger": self.logger,
                 "name": "motor X",
                 "uart": TMC2208UART(port=port_x),
             },
             config_callback=_config_motor,
-            name="X-axis"
+            motor_name="X-axis"
         )
         
         self._proc_y = MPMCProcess(
             conn=py_child,
             motor_class=TMC2208StepperMotor,
             motor_kwargs={
-                "pin_config": PinConfig(step_pin_ID=19, dir_pin_ID=20, use_pigpio=True),
+                "pin_config": PinConfig(step_pin=19, dir_pin=20, use_pigpio=True),
                 "logger": self.logger,
                 "name": "motor Y",
                 "uart": TMC2208UART(port=port_y),
             },
             config_callback=_config_motor,
-            name="Y-axis"
+            motor_name="Y-axis"
         )
 
         self._x_prepared = False
@@ -162,8 +162,8 @@ class XYMotionPLC(AbstractPLC):
             self.logger.info("Prepare motion profiles")
             self._x_busy = True
             self._y_busy = True
-            mp_x = self.shared_data.data["motion_profile_x"]
-            mp_y = self.shared_data.data["motion_profile_y"]
+            mp_x = self.hmi_data.data["motion_profile_x"]
+            mp_y = self.hmi_data.data["motion_profile_y"]
             
             self._px_parent.send({
                 "cmd": "prepare_profile",

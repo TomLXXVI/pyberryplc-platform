@@ -10,7 +10,6 @@ launch this script as a "sudo user". For this purpose a shell script
 scripts in this demo folder by running `source run_with_keyboard.sh` at the
 console prompt.
 """
-import os
 from pyberryplc.core import AbstractPLC
 from pyberryplc.stepper import (
     PinConfig,
@@ -18,44 +17,43 @@ from pyberryplc.stepper import (
     TMC2208UART,
     RotatorType,
 )
-
-# Use the `TrapezoidalProfile` from the `single_axis.py` module (only 
-# an appropriate choice for simple, single-axis motion). 
-from pyberryplc.motion.single_axis import TrapezoidalProfile
-
+from pyberryplc.motion.profile import TrapezoidalProfile
 from pyberryplc.motion import RotationDirection
-from pyberryplc.utils.log_utils import init_logger
-
 from pyberryplc.utils.keyboard_input import KeyInput
 
 
-class StepperUARTTestPLC(AbstractPLC):
+def stepper_motor_setup(logger):
+    stepper = TMC2208StepperMotor(
+        pin_config=PinConfig(
+            step_pin=21,
+            dir_pin=27
+        ),
+        logger=logger,
+        name="x-motor",
+        uart=TMC2208UART(port="/dev/ttyUSB0")
+    )
+    stepper.attach_rotator(RotatorType.MOTION_PROFILE)
+    stepper.rotator.profile = TrapezoidalProfile(
+        ds_tot=720,
+        a_max=360,
+        v_max=180,
+        v_i=0.0,
+        v_f=0.0
+    )
+    return stepper
+
+
+class StepperUARTPLC(AbstractPLC):
     
     def __init__(self, logger):
         super().__init__(logger=logger)
         
-        # Use keyboard connected with the Raspberry Pi to send commands to
-        # the PLC program by pressing keys.
+        # Use keyboard connected with the Raspberry Pi to send inputs to
+        # the PLC program.
         self.key_input = KeyInput()
-        
-        # Setup of the stepper motor driver.
-        self.stepper = TMC2208StepperMotor(
-            pin_config=PinConfig(
-                step_pin_ID=21,
-                dir_pin_ID=27
-            ),
-            logger=self.logger,
-            name="motor X",
-            uart=TMC2208UART(port="/dev/ttyUSB1")
-        )
-        
-        # Configure motor rotation with a motion profile.
-        self.stepper.attach_rotator(RotatorType.MOTION_PROFILE)
-        self.stepper.rotator.profile = TrapezoidalProfile(
-            ds_tot=180,
-            dt_tot=1,
-            dt_i=0.25
-        )
+
+        # Stepper motor setup.
+        self.stepper = stepper_motor_setup(self.logger)
 
         self.X0 = self.add_marker("X0")
         self.X1 = self.add_marker("X1")
@@ -66,14 +64,14 @@ class StepperUARTTestPLC(AbstractPLC):
     def _init_control(self):
         # Initialization routine runs only once in the first scan cycle of the
         # PLC program. `self.input_flag` prevents re-initialization in 
-        # subsequent scan cycles
+        # subsequent scan cycles.
         if self.input_flag:
             self.input_flag = False
             
             # Stepper driver configuration via UART.
             self.stepper.enable(high_sensitivity=True)  # Turn the driver on.
             self.stepper.configure_microstepping(
-                resolution="1/16",
+                resolution="1/2",
                 ms_pins=None,
                 full_steps_per_rev=200
             )
@@ -85,8 +83,6 @@ class StepperUARTTestPLC(AbstractPLC):
             self.X0.activate()
     
     def _sequence_control(self):
-        # The structure of the PLC program is based on the "Sequential Function 
-        # Chart" (SFC) approach.
         if self.X0.active and self.key_input.rising_edge("s"):
             self.logger.info("Start: rotating forward")
             self.X0.deactivate()
@@ -109,12 +105,12 @@ class StepperUARTTestPLC(AbstractPLC):
         if self.X1.rising_edge:
             # Set rotation direction and give the motor the command to rotate
             # counterclockwise.
-            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CCW
             self.stepper.rotator.rotate()
             self.logger.info("Press 'r' to start motor in reverse")
             
         if self.X2.rising_edge:
-            self.stepper.rotator.direction = RotationDirection.CLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CW
             self.stepper.rotator.rotate()
             self.logger.info("Press 'q' to go back to idle")
             
@@ -148,8 +144,11 @@ class StepperUARTTestPLC(AbstractPLC):
 
 
 if __name__ == "__main__":
+    import os
+    from pyberryplc.utils.log_utils import init_logger
+
     os.system("clear")
     logger = init_logger(name="STEPPER PLC")
     logger.info("Run `stepper_motor04.py`")
-    plc = StepperUARTTestPLC(logger)
+    plc = StepperUARTPLC(logger)
     plc.run()

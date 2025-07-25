@@ -3,8 +3,8 @@ import math
 from pyberryplc.hmi import AbstractHMI, ErrorDialog
 from pyberryplc.core import HMISharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.multi_axis import TrapezoidalProfile, SCurvedProfile
-from pyberryplc.motion.trajectory import TrajectoryPlanner, StepperMotorMock
+from pyberryplc.motion.profile import TrapezoidalProfile, SCurvedProfile, RotationDirection
+from pyberryplc.motion.trajectory_new import XYZTrajectory
 
 from plc_app import XYMotionPLC
 
@@ -12,6 +12,7 @@ from plc_app import XYMotionPLC
 class XYMotionHMI(AbstractHMI):
     
     def __init__(self, app, ui):
+
         self.shared = HMISharedData(
             buttons={"start_motion": False},
             data={
@@ -29,7 +30,8 @@ class XYMotionHMI(AbstractHMI):
                 "travel_time_y": float('nan'),
             }
         )
-        
+
+        # noinspection PyTypeChecker
         super().__init__(
             title="XY Motion Demo",
             app=app,
@@ -89,30 +91,24 @@ class XYMotionHMI(AbstractHMI):
             profile_type = SCurvedProfile
         
         try:
-            planner = TrajectoryPlanner(
-                pitch=pitch, 
-                profile_type=profile_type, 
-                a_m=alpha, 
-                v_m=omega,
-                x_motor=StepperMotorMock(
-                    full_steps_per_rev=200, 
-                    microstep_factor=1  # full step
-                ),
-                y_motor=StepperMotorMock(
-                    full_steps_per_rev=200,
-                    microstep_factor=1  # full step
-                )
+            trajectory = XYZTrajectory(
+                n_axes=2,
+                profile_type=profile_type,
+                pitch=pitch,
+                rdir_ref=(RotationDirection.CCW, RotationDirection.CCW),
+                alpha_max=alpha,
+                omega_max=omega
             )
-            trajectory = planner.get_trajectory(p1, p2)
-            segment = trajectory[0]
+            trajectory(p1, p2)
+            segment = trajectory.segments[0]
         except Exception as e:
             msg = f"Calculation of motion profiles failed: {e}"
             ErrorDialog(self, msg).open()
             self.logger.error(msg)
             return
         
-        self.shared.data["motion_profile_x"] = segment.mp_x
-        self.shared.data["motion_profile_y"] = segment.mp_y
+        self.shared.data["motion_profile_x"] = segment.axes["x"].motion_profile
+        self.shared.data["motion_profile_y"] = segment.axes["y"].motion_profile
         self.shared.buttons["start_motion"] = True
 
     def update_status(self) -> None:

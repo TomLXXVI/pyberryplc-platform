@@ -2,7 +2,6 @@ import warnings
 import io
 import csv
 from functools import partial
-import asyncio
 
 import plotly.graph_objects as go
 from nicegui.events import UploadEventArguments, ValueChangeEventArguments
@@ -10,9 +9,8 @@ from nicegui.events import UploadEventArguments, ValueChangeEventArguments
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.core import HMISharedData
 from pyberryplc.utils.log_utils import init_logger
-from pyberryplc.motion.multi_axis import SCurvedProfile
-from pyberryplc.motion.trajectory import TrajectoryPlanner, Trajectory, StepperMotorMock
-from pyberryplc.motion.utils import get_pitch
+from pyberryplc.motion.profile import SCurvedProfile, RotationDirection
+from pyberryplc.motion.trajectory_new import XYZTrajectory
 
 from plc_app import XYMotionPLC
 
@@ -22,6 +20,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 class XYMotionHMI(AbstractHMI):
     
     def __init__(self, app, ui):
+
         self.shared_data = HMISharedData(
             buttons={
                 "start_motion": False,
@@ -43,7 +42,7 @@ class XYMotionHMI(AbstractHMI):
         )
 
         self.points: list[tuple[float, float]] = []
-        self.trajectory = Trajectory()
+        self.trajectory = None
         self.trajectory_fig = go.Figure(go.Scatter(x=[0.0], y=[0.0]))
         self.trajectory_fig.update_layout(
             title=None,
@@ -66,7 +65,8 @@ class XYMotionHMI(AbstractHMI):
         self.y_input = None
         self.trajectory_plot = None
         self.profile_dialog = None
-        
+
+        # noinspection PyTypeChecker
         super().__init__(
             title="XY Trajectory Demo",
             app=app,
@@ -146,7 +146,7 @@ class XYMotionHMI(AbstractHMI):
         if not self.trajectory:
             self.ui.notify("No trajectory to send.", color="red")
             return
-        self.shared_data.data["segments"] = self.trajectory
+        self.shared_data.data["segments"] = self.trajectory.segments
         self.shared_data.buttons["start_motion"] = True
         self.ui.notify("Trajectory sent to PLC.")
 
@@ -193,6 +193,7 @@ class MotionProfileDialog:
         self.vel = None
         self.acc = None
         self.points = []
+
         self.profile_fig = go.Figure()
         self.profile_fig.update_layout(
             title=None,
@@ -262,22 +263,22 @@ class MotionProfileDialog:
             return
 
         if self.selected_profile == "position":
-            t_x = self.pos["x"]["time"]
-            y_x = self.pos["x"]["values"] * 1000  # mm
-            t_y = self.pos["y"]["time"]
-            y_y = self.pos["y"]["values"] * 1000
+            t_x = self.pos["x"][0]
+            y_x = self.pos["x"][1] * 1000  # mm
+            t_y = self.pos["y"][0]
+            y_y = self.pos["y"][1] * 1000
             y_label = "position, mm"
         elif self.selected_profile == "acceleration":
-            t_x = self.acc["x"]["time"]
-            y_x = self.acc["x"]["values"] * 1000  # mm/s²
-            t_y = self.acc["y"]["time"]
-            y_y = self.acc["y"]["values"] * 1000
+            t_x = self.acc["x"][0]
+            y_x = self.acc["x"][1] * 1000  # mm/s²
+            t_y = self.acc["y"][0]
+            y_y = self.acc["y"][1] * 1000
             y_label = "acceleration, mm/s²"
         else:
-            t_x = self.vel["x"]["time"]
-            y_x = self.vel["x"]["values"] * 1000 # mm/s
-            t_y = self.vel["y"]["time"]
-            y_y = self.vel["y"]["values"] * 1000
+            t_x = self.vel["x"][0]
+            y_x = self.vel["x"][1] * 1000 # mm/s
+            t_y = self.vel["y"][0]
+            y_y = self.vel["y"][1] * 1000
             y_label = "velocity, mm/s"
 
         self.profile_fig.data = []
@@ -323,25 +324,16 @@ class MotionProfileDialog:
         self._dialog.open()
     
     async def _compute_trajectory(self, points: list[tuple[float, float]]):
-        trajectory_planner = TrajectoryPlanner(
-            pitch=get_pitch(1, 0.01),
-            profile_type=SCurvedProfile,
-            a_m=5000.0,
-            v_m=2700.0,
-            x_motor=StepperMotorMock(200, 1),
-            y_motor=StepperMotorMock(200, 1),
-        )
         points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
-        # `trajectory_planner.get_trajectory(*points)` may be a long running task.
-        # Therefore, we run it with asyncio in a separate thread in order not to 
-        # block NiceGui's event loop. Using `asyncio.to_thread(...)` avoids blocking
-        # while preserving access to complex return objects (e.g., Trajectory2D),
-        # which would not be safely transferable via ProcessPoolExecutor.
-        self.hmi.trajectory = await asyncio.to_thread(
-            trajectory_planner.get_trajectory, 
-            *points,
-            optimize=True,
-            allowed_path_deviation=1.e-4,
-            num_points=100
+        self.hmi.trajectory = XYZTrajectory(
+            n_axes=2,
+            profile_type=SCurvedProfile,
+            pitch=250.0,
+            rdir_ref=(RotationDirection.CCW, RotationDirection.CCW),
+            alpha_max=1500.0,
+            omega_max=1500.0,
         )
-        self.pos, self.vel, self.acc = self.hmi.trajectory.motion_profiles
+        self.hmi.trajectory(*points)
+        self.pos = self.hmi.trajectory.position_profiles
+        self.vel = self.hmi.trajectory.velocity_profiles
+        self.acc = self.hmi.trajectory.acceleration_profiles

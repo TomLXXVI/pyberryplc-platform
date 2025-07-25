@@ -22,13 +22,14 @@ class PLCThreadManager:
         self._clean_exit: bool = False
     
     def _start_plc_thread(self) -> None:
-        """Create the PLC application instance and start its scan cycle inside a
-        separate thread.
+        """Creates the PLC application instance and start its scan cycle inside
+        a separate thread.
         """
         def _plc_thread_fn():
             try:
+                # noinspection PyCallingNonCallable
                 self._plc_instance = self._plc_class(
-                    shared_data=self.shared_data,
+                    hmi_data=self.shared_data,
                     logger=self.logger
                 )
                 self._plc_instance.run()
@@ -117,7 +118,7 @@ class AbstractHMI(ABC):
             Name for the HMI app.
         shared_data : HMISharedData
             The shared object for data exchange between PLC and HMI.
-        plc_app : AbstractPLC
+        plc_app : Type[AbstractPLC]
             PLC application class, i.e. the concrete class inherited from 
             `AbstractPLC`.
         logger : 

@@ -21,15 +21,15 @@ def create_dynamic_stepper_motor(
     """
     stepper = TMC2208StepperMotor(
         pin_config=PinConfig(
-            step_pin_ID=cfg["step_pin_ID"],
-            dir_pin_ID=cfg["dir_pin_ID"]
+            step_pin=cfg["step_pin_ID"],
+            dir_pin=cfg["dir_pin_ID"]
         ),
         logger=logger,
         name=name,
         uart=TMC2208UART(port=cfg["comm_port"])
     )
     stepper.attach_rotator(RotatorType.DYNAMIC_THREADED)
-    stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+    stepper.rotator.direction = RotationDirection.CCW
     stepper.rotator.profile = TrapezoidalProfile(
         ds_tot=720.0,  # deg
         a_m=1000.0,    # deg/s2

@@ -12,7 +12,7 @@ logger = init_logger(level=logging.DEBUG)
 
 
 def test():
-    with TMC2208UART(port="/dev/ttyUSB1", logger=logger) as uart:
+    with TMC2208UART(port="/dev/ttyUSB0", logger=logger) as uart:
         print("Read CHOPCONF register: ")
         print(uart.read_register("CHOPCONF"))
 

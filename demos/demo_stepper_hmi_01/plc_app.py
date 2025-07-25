@@ -18,8 +18,8 @@ class StepperMotorPLC(AbstractPLC):
         # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
             pin_config=PinConfig(
-                step_pin_ID=21,
-                dir_pin_ID=27
+                step_pin=21,
+                dir_pin=27
             ),
             logger=self.logger,
             name="motor X",
@@ -82,11 +82,11 @@ class StepperMotorPLC(AbstractPLC):
             self.stepper.rotator.stop()
             
         if self.X1.rising_edge:
-            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CCW
             self.stepper.rotator.start()
          
         if self.X2.rising_edge:
-            self.stepper.rotator.direction = RotationDirection.CLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CW
             self.stepper.rotator.start()
     
     def _update_statuses(self):

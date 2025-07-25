@@ -1,7 +1,7 @@
 from typing import Callable, Type, Any, TypeVar
 from logging import Logger
 from pyberryplc.core import AbstractPLC, HMISharedData, CounterUp
-from pyberryplc.motion.trajectory import Trajectory
+from pyberryplc.motion.trajectory_new import XYZSegment
 
 from pyberryplc.stepper import (
     StepperMotor,
@@ -77,7 +77,7 @@ class MotorController:
             motor_class=self.motor_class,
             motor_kwargs=motor_kwargs,
             config_callback=self.cfg_callback,
-            name=self.motor_name
+            motor_name=self.motor_name
         )
     
     def enable(self) -> None:
@@ -113,7 +113,7 @@ class XYMotionPLC(AbstractPLC):
     
     def __init__(self, hmi_data: HMISharedData, logger: Logger):
         super().__init__(hmi_data=hmi_data, logger=logger)
-        self.trajectory: Trajectory | None = None
+        self.segments: list[XYZSegment] | None = None
 
         # Internal markers
         self.X0 = self.add_marker("X0")
@@ -149,8 +149,8 @@ class XYMotionPLC(AbstractPLC):
             motor_name="X-axis",
             motor_class=TMC2208StepperMotor,
             pin_config=PinConfig(
-                step_pin_ID=x_cfg["step_pin_ID"], 
-                dir_pin_ID=x_cfg["dir_pin_ID"], 
+                step_pin=x_cfg["step_pin_ID"],
+                dir_pin=x_cfg["dir_pin_ID"],
                 use_pigpio=True
             ),
             cfg_callback=lambda m: _config_motor(m, x_cfg),
@@ -164,8 +164,8 @@ class XYMotionPLC(AbstractPLC):
             motor_name="Y-axis",
             motor_class=TMC2208StepperMotor,
             pin_config=PinConfig(
-                step_pin_ID=y_cfg["step_pin_ID"], 
-                dir_pin_ID=y_cfg["dir_pin_ID"], 
+                step_pin=y_cfg["step_pin_ID"],
+                dir_pin=y_cfg["dir_pin_ID"],
                 use_pigpio=True
             ),
             cfg_callback=lambda m: _config_motor(m, y_cfg),
@@ -219,14 +219,14 @@ class XYMotionPLC(AbstractPLC):
 
     def _execute_actions(self):
         if self.X0.rising_edge:
-            self.trajectory = None
+            self.segments = None
             self.num_segments = 0
             self.segment_counter.reset()
         
         if self.X1.rising_edge:
             # Get trajectory segments
-            self.trajectory = self.shared_data.data["segments"]
-            self.num_segments = len(self.trajectory)
+            self.segments = self.hmi_data.data["segments"]
+            self.num_segments = len(self.segments)
             self.trajectory_ready.update(True)
             self.x_motor_busy.update(True)
             self.y_motor_busy.update(True)
@@ -241,18 +241,18 @@ class XYMotionPLC(AbstractPLC):
             self.x_motor_ready.update(False)
             self.y_motor_ready.update(False)
             
-            segment = self.trajectory[self.segment_counter.value - 1]
-            self.shared_data.data["segment_count"] = self.segment_counter.value
+            segment = self.segments[self.segment_counter.value - 1]
+            self.hmi_data.data["segment_count"] = self.segment_counter.value
             
             self.x_interface.send({
                 "cmd": "start_segment",
-                "delays": segment.delays_x,
-                "direction": segment.rdir_x,
+                "delays": segment.axes["x"].get_stepper_signal(full_steps_per_rev=200, microstep_factor=2),
+                "direction": segment.axes["x"].rdir
             })
             self.y_interface.send({
                 "cmd": "start_segment",
-                "delays": segment.delays_y,
-                "direction": segment.rdir_y,
+                "delays": segment.axes["y"].get_stepper_signal(full_steps_per_rev=200, microstep_factor=2),
+                "direction": segment.axes["y"].rdir
             })
             
             self.segment_counter.count_up()

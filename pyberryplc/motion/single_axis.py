@@ -486,7 +486,7 @@ class MotionProfile(ABC):
         N: float | None = None
     ) -> Callable[[float], float]:
         """Returns a function that takes a time moment `t` and returns the 
-        velocity `v` at that time moment (`0 <= t <= dt_tot`).
+        velocity `velocity` at that time moment (`0 <= t <= dt_tot`).
 
         Parameters
         ----------
@@ -571,7 +571,7 @@ class MotionProfile(ABC):
     
     def get_ini_velocity_time_fn(self) -> Callable[[float], float]:
         """Returns a function that takes a time moment `t` in seconds and 
-        returns the velocity `v` at that moment during the acceleration phase
+        returns the velocity `velocity` at that moment during the acceleration phase
         of the movement (`0 <= t <= dt_acc`).
         If `t > dt_acc`, the velocity at `dt_acc` is returned, i.e. also the
         velocity during the constant-velocity phase.
@@ -600,7 +600,7 @@ class MotionProfile(ABC):
         v0: float
     ) -> Callable[[float], float]:
         """Returns a function that takes a time moment `t` in seconds and 
-        returns the velocity `v` at that moment during the deceleration phase
+        returns the velocity `velocity` at that moment during the deceleration phase
         of the movement (`t0 <= t <= t0 + dt_dec`).
         
         Parameters
@@ -652,7 +652,7 @@ class MotionProfile(ABC):
         return f
     
     def get_ini_time_velocity_fn(self) -> Callable[[float], float]:
-        """Returns a function that takes a velocity `v` and returns the 
+        """Returns a function that takes a velocity `velocity` and returns the 
         time moment `t` in seconds when this velocity is reached.
         """
         t0, v0, s0 = 0.0, 0.0, 0.0
@@ -699,7 +699,7 @@ class MotionProfile(ABC):
         # Between t0 and t1 it is possible for the velocity to become negative
         # depending on the initial conditions. 
         if v_arr[-1] < 0.0:
-            # Find time `t1` where `v = 0`
+            # Find time `t1` where `velocity = 0`
             t_pos = t_arr[v_arr > 0][-1]
             t_neg = t_arr[v_arr < 0][0]
             interp_t = scipy.interpolate.interp1d(t_arr, v_arr)
@@ -730,7 +730,7 @@ class MotionProfile(ABC):
         s0: float, 
         v0: float
     ) -> Callable[[float], float]:
-        """Returns a function that takes a velocity `v` and returns the 
+        """Returns a function that takes a velocity `velocity` and returns the 
         time moment `t` in seconds when this velocity is reached.
 
         Parameters
@@ -748,7 +748,7 @@ class MotionProfile(ABC):
         # Between t0 and t1 it is possible for the velocity to become negative
         # depending on the initial conditions. 
         if v_arr[-1] < 0.0:
-            # Find time `t1` where `v = 0`
+            # Find time `t1` where `velocity = 0`
             t_pos = t_arr[v_arr > 0][-1]
             t_neg = t_arr[v_arr < 0][0]
             interp_t = scipy.interpolate.interp1d(t_arr, v_arr)

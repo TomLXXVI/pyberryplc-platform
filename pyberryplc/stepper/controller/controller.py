@@ -13,10 +13,10 @@ from pyberryplc.stepper.uart.tmc2208_uart import TMC2208UART
 from pyberryplc.stepper.controller.process import SPMCProcess
 
 from pyberryplc.core import MemoryVariable, CounterUp, AbstractPLC, HMISharedData
-from pyberryplc.motion import RotationDirection
+from pyberryplc.motion.profile import RotationDirection
 
 
-class SPMotorController:
+class MotorController:
     """
     Creates and controls a separate `SPMCProcess` which holds a concrete 
     `StepperMotor` instance inside it. A `multiprocessing.Pipe` is used to
@@ -66,11 +66,14 @@ class SPMotorController:
         self.cfg_callback = cfg_callback
         self.comm_port = comm_port
         self.logger = logger
+
         self._motor_busy = MemoryVariable(False, False)
         self._motor_ready = MemoryVariable(False, False)
         self._travel_time = MemoryVariable(float("nan"), float("nan"))
+
         self.segment_counter = CounterUp()
         self.num_segments: int = 0
+
         self._create_spmc_process()
     
     def _create_spmc_process(self) -> None:
@@ -79,20 +82,24 @@ class SPMotorController:
         `SPMotorController`.
         """
         self.com_interface, _spmc_endpoint = Pipe()
+
         motor_kwargs: dict[str, Any] = {
             "pin_config": self.pin_config,
             "logger": self.logger,
             "name": self.motor_name,
         }
+
         c1 = issubclass(self.motor_class, TMC2208StepperMotor)
         c2 = self.comm_port
-        if c1 and c2: motor_kwargs["uart"] = TMC2208UART(port=self.comm_port)
+        if c1 and c2:
+            motor_kwargs["uart"] = TMC2208UART(port=self.comm_port)
+
         self._mc_process = SPMCProcess(
             conn=_spmc_endpoint,
             motor_class=self.motor_class,
             motor_kwargs=motor_kwargs,
             config_callback=self.cfg_callback,
-            name=self.motor_name
+            motor_name=self.motor_name
         )
         
     def enable(self) -> None:
@@ -166,8 +173,8 @@ class SPMotorController:
     @property
     def motor_busy(self) -> bool | int:
         """
-        Indicates if the motor has completed the current trajectory, i.e. all of
-        its rotations are done (returns `False`), or not (returns `True`).
+        Indicates whether the motor has completed the current trajectory, i.e.
+        all of its rotations are done (returns `False`), or not (returns `True`).
         """
         return self._motor_busy.state
     
@@ -186,9 +193,9 @@ class SPMotorController:
         """
         return self._travel_time.state
     
-    def send_step_pulse_signal(
+    def send_stepper_signal(
         self, 
-        signal: list[float], 
+        step_pulses: list[float],
         rdir: RotationDirection
     ) -> None:
         """
@@ -205,7 +212,7 @@ class SPMotorController:
         
         self.com_interface.send({
             "cmd": "start_segment",
-            "delays": signal,
+            "delays": step_pulses,
             "direction": rdir
         })
 
@@ -264,7 +271,7 @@ class XYZMotionController:
     """
     High-level class that can encapsulate three motor controllers 
     (`SPMotorController`) to simultaneousely control X-axis, Y-axis, and Z-axis
-    motion (3D-motion). The class uses the `TMC2208StepperMotor`. The
+    motion (3D-motion). This class uses the `TMC2208StepperMotor` with UART. The
     configuration settings for each `TMC2208StepperMotor` are taken from a 
     TOML file.
     """
@@ -296,12 +303,16 @@ class XYZMotionController:
         self.x_motor_cfg: dict | None = None
         self.y_motor_cfg: dict | None = None
         self.z_motor_cfg: dict | None = None
-        self.x_motor_ctrl: SPMotorController | None = None
-        self.y_motor_ctrl: SPMotorController | None = None
-        self.z_motor_ctrl: SPMotorController | None = None
-        self.motor_ctrls: tuple[SPMotorController, ...] | None = None
-        self.trajectory: list[dict[str, Any]] | None = None
-        self.segments: Iterator[tuple[int, dict[str, Any]]] | None = None
+
+        self.x_motor_ctrl: MotorController | None = None
+        self.y_motor_ctrl: MotorController | None = None
+        self.z_motor_ctrl: MotorController | None = None
+        self.motor_ctrls: tuple[MotorController, ...] | None = None
+
+        TSegment = dict[str, tuple[list[float], RotationDirection]]
+        TTrajectory = list[TSegment]
+        self.trajectory: TTrajectory | None = None
+        self.segments: Iterator[tuple[int, TSegment]] | None = None
         
         self._load_motor_configurations()
         self._create_motor_controllers()
@@ -318,7 +329,11 @@ class XYZMotionController:
             self.y_motor_cfg = config.get("y_motor")
             self.z_motor_cfg = config.get("z_motor")
 
-    def _create_motor_controller(self, axis_name: str, cfg: dict) -> SPMotorController:
+    def _create_motor_controller(
+        self,
+        axis_name: str,
+        cfg: dict
+    ) -> MotorController:
         """
         Creates and returns a `SPMotorController` for the specified axis.
         """
@@ -326,12 +341,12 @@ class XYZMotionController:
         dir_pin_ID = cfg.get("dir_pin_ID")
         comm_port = cfg.get("comm_port")
 
-        motor_controller = SPMotorController(
+        motor_controller = MotorController(
             motor_name=axis_name,
             motor_class=self.motor_class,
             pin_config=PinConfig(
-                step_pin_ID=step_pin_ID,
-                dir_pin_ID=dir_pin_ID,
+                step_pin=step_pin_ID,
+                dir_pin=dir_pin_ID,
                 use_pigpio=True
             ),
             cfg_callback=lambda motor: self._config_motor(motor, cfg),
@@ -373,24 +388,28 @@ class XYZMotionController:
         configuration exists for that axis.
         """
         motor_ctrls = []
+
         if self.x_motor_cfg is not None:
             self.x_motor_ctrl = self._create_motor_controller(
                 "X-axis", 
                 self.x_motor_cfg
             )
             motor_ctrls.append(self.x_motor_ctrl)
+
         if self.y_motor_cfg is not None:
             self.y_motor_ctrl = self._create_motor_controller(
                 "Y-axis", 
                 self.y_motor_cfg
             )
             motor_ctrls.append(self.y_motor_ctrl)
+
         if self.z_motor_cfg is not None:
             self.z_motor_ctrl = self._create_motor_controller(
                 "Z-axis", 
                 self.z_motor_cfg
             )
             motor_ctrls.append(self.z_motor_ctrl)
+
         self.motor_ctrls = tuple(motor_ctrls)
         
     def enable(self) -> None:
@@ -419,7 +438,7 @@ class XYZMotionController:
         Returns the current operating state of each individual motor and the 
         global operating state of the motion control.
         """
-        def get_motor_status(motor_ctrl: SPMotorController) -> MotorStatus:
+        def get_motor_status(motor_ctrl: MotorController) -> MotorStatus:
             return MotorStatus(
                 ready=motor_ctrl.motor_ready,
                 busy=motor_ctrl.motor_busy,
@@ -445,7 +464,7 @@ class XYZMotionController:
         number of segments (movements) in the trajectory. 
 
         A trajectory JSON file is created by calling method 
-        `save_stepper_driver_signals()` on a `Trajectory` object.
+        `save_stepper_signals()` on a `Trajectory` object.
         """
         with open(filepath, "r") as f:
             self.trajectory = json.load(f)
@@ -466,30 +485,32 @@ class XYZMotionController:
     def _get_rotation_direction(rdir: str) -> RotationDirection | None:
         match rdir:
             case "counterclockwise":
-                return RotationDirection.COUNTERCLOCKWISE
+                return RotationDirection.CCW
             case "clockwise":
-                return RotationDirection.CLOCKWISE
+                return RotationDirection.CW
         return None
     
-    def _send_step_pulse_signals(self, segment: dict[str, Any]) -> None:
+    def _send_stepper_signals(self, segment: dict[str, Any]) -> None:
         """
         Sends the step pulse signals (including the rotation direction) of a 
         single segment in the loaded trajectory to the motor controllers.
         """
         if self.x_motor_ctrl is not None: 
-            self.x_motor_ctrl.send_step_pulse_signal(
-                signal=segment["delays_x"],
-                rdir=self._get_rotation_direction(segment["rdir_x"])
+            self.x_motor_ctrl.send_stepper_signal(
+                step_pulses=segment["x"][0],
+                rdir=self._get_rotation_direction(segment["x"][1])
             )
+
         if self.y_motor_ctrl is not None:
-            self.y_motor_ctrl.send_step_pulse_signal(
-                signal=segment["delays_y"],
-                rdir=self._get_rotation_direction(segment["rdir_y"])
+            self.y_motor_ctrl.send_stepper_signal(
+                step_pulses=segment["y"][0],
+                rdir=self._get_rotation_direction(segment["y"][1])
             )
+
         if self.z_motor_ctrl is not None:
-            self.z_motor_ctrl.send_step_pulse_signal(
-                signal=segment["delays_z"],
-                rdir=self._get_rotation_direction(segment["rdir_z"])
+            self.z_motor_ctrl.send_stepper_signal(
+                step_pulses=segment["z"][0],
+                rdir=self._get_rotation_direction(segment["z"][1])
             )
     
     def move(self) -> int:
@@ -505,7 +526,7 @@ class XYZMotionController:
             except StopIteration:
                 return -1
             else:
-                self._send_step_pulse_signals(segment)
+                self._send_stepper_signals(segment)
                 return i
         else:
             raise AttributeError("No trajectory has been loaded yet.")

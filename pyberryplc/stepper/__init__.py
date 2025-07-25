@@ -20,7 +20,7 @@ __all__ = [
     "TMC2208UART",
     "TRotator",
     "TStepperMotor",
-    "SPMotorController",
+    "MotorController",
     "XYZMotionController",
     "XYZMotionPLC"
 ]

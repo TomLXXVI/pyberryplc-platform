@@ -175,9 +175,10 @@ class TMC2208StepperMotor(StepperMotor):
             reg_name="CHOPCONF",
             fields={
                 "toff": 3,  # Enable driver - off time setting controls duration of slow decay phase
-                "vsense": high_sensitivity,
+                "vsense": high_sensitivity
             }
         )
+        self.logger.info("Enable through UART")
     
     def disable(self) -> None:
         """

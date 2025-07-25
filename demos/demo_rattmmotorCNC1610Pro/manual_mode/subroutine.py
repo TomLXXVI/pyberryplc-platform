@@ -134,27 +134,27 @@ class ManualModeSubRoutine:
     
     def _execute_actions(self) -> None:
         if self.X11.rising_edge:
-            self.xmotor.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.xmotor.rotator.direction = RotationDirection.CCW
             self.xmotor.rotator.start()
         
         if self.X12.rising_edge:
-            self.xmotor.rotator.direction = RotationDirection.CLOCKWISE
+            self.xmotor.rotator.direction = RotationDirection.CW
             self.xmotor.rotator.start()
         
         if self.X21.rising_edge:
-            self.ymotor.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.ymotor.rotator.direction = RotationDirection.CCW
             self.ymotor.rotator.start()
         
         if self.X22.rising_edge:
-            self.ymotor.rotator.direction = RotationDirection.CLOCKWISE
+            self.ymotor.rotator.direction = RotationDirection.CW
             self.ymotor.rotator.start()
 
         if self.X31.rising_edge:
-            self.zmotor.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.zmotor.rotator.direction = RotationDirection.CCW
             self.zmotor.rotator.start()
 
         if self.X32.rising_edge:
-            self.zmotor.rotator.direction = RotationDirection.CLOCKWISE
+            self.zmotor.rotator.direction = RotationDirection.CW
             self.zmotor.rotator.start()
         
         if self.X4.rising_edge:

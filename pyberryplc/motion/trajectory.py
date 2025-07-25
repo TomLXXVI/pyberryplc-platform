@@ -43,6 +43,7 @@ class AxisData:
     mp: MotionProfile | None
 
 
+# noinspection PyTypeChecker
 @dataclass
 class SegmentData:
     """
@@ -205,6 +206,7 @@ class SegmentData:
         return "\n".join(lines)
 
 
+# noinspection PyTypeChecker
 @dataclass
 class Segment:
     """
@@ -253,9 +255,9 @@ class Segment:
     delays_x: list[float] = field(default_factory=list)
     delays_y: list[float] = field(default_factory=list)
     delays_z: list[float] = field(default_factory=list)
-    rdir_x: RotationDirection = RotationDirection.COUNTERCLOCKWISE
-    rdir_y: RotationDirection = RotationDirection.COUNTERCLOCKWISE
-    rdir_z: RotationDirection = RotationDirection.COUNTERCLOCKWISE
+    rdir_x: RotationDirection = RotationDirection.CCW
+    rdir_y: RotationDirection = RotationDirection.CCW
+    rdir_z: RotationDirection = RotationDirection.CCW
     path_deviation: float = 0.0
     
     def __str__(self):
@@ -467,6 +469,8 @@ class MotionProcessor:
             t_arr, theta_arr = mp.position_profile()
             s_arr = theta_arr / (360.0 * pitch)  # convert axis motor angle back to axis position  
             if rdir == ~rdir_pos:
+                # if direction of movement is negative, the s-coordinates lie on
+                # the other side of s0 (s < s0)
                 s0 = s_arr[0]
                 ds_arr = s_arr - s0
                 s0_arr = np.full_like(s_arr, s0)
@@ -502,6 +506,8 @@ class MotionProcessor:
             t_arr, omega_arr = mp.velocity_profile()
             v_arr = omega_arr / (360.0 * pitch)
             if rdir == ~rdir_pos:
+                # if direction of movement is negative, this is indicated by a
+                # negative value of the velocity
                 v_arr *= -1.0
             return t_arr, v_arr
         
@@ -763,7 +769,7 @@ class Trajectory(list[Segment]):
         acc_profile : dict[str, float]
             Connected acceleration profile of the trajectory.
 
-        The dictionaries all have the same structure:
+        The returned dictionaries all have the same structure:
         ```
         <profile> = {
             "x": {
@@ -833,6 +839,7 @@ class Trajectory(list[Segment]):
         Saves the list with stepper driver signals to a JSON file.
         """
         with open(file_path, "w") as f:
+            # noinspection PyTypeChecker
             json.dump(self.get_stepper_driver_signals(), f)
 
     @classmethod
@@ -872,9 +879,9 @@ class TrajectoryPlanner:
         x_motor: StepperMotorMock | None = None,
         y_motor: StepperMotorMock | None = None,
         z_motor: StepperMotorMock | None = None,
-        x_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE,
-        y_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE,
-        z_rdir_pos: RotationDirection = RotationDirection.COUNTERCLOCKWISE
+        x_rdir_pos: RotationDirection = RotationDirection.CCW,
+        y_rdir_pos: RotationDirection = RotationDirection.CCW,
+        z_rdir_pos: RotationDirection = RotationDirection.CCW
     ) -> None:
         """
         Creates a `TrajectoryPlanner` object.
@@ -1027,9 +1034,9 @@ class TrajectoryPlanner:
                 rdir_pos_x=self.x_rdir_pos, rdir_pos_y=self.y_rdir_pos, rdir_pos_z=self.z_rdir_pos,
                 theta_xi=theta_i[0], theta_yi=theta_i[1], theta_zi=theta_i[2],
                 profile_type=self.profile_type,
-                xpitch = self.xpitch, ypitch = self.ypitch, zpitch = self.zpitch,
-                omega_xm=self.vx_m, omega_ym=self.vy_m, omega_zm = self.vz_m,
-                alpha_xm = self.ax_m, alpha_ym = self.ay_m, alpha_zm = self.az_m
+                xpitch=self.xpitch, ypitch=self.ypitch, zpitch=self.zpitch,
+                omega_xm=self.vx_m, omega_ym=self.vy_m, omega_zm=self.vz_m,
+                alpha_xm=self.ax_m, alpha_ym=self.ay_m, alpha_zm=self.az_m
             )
             # start and end point of the trajectory have zero velocities
             if i == 0:
@@ -1197,6 +1204,7 @@ class TrajectoryPlanner:
                         s_i=mp.s_i,
                         dt_tot=mp_ref.dt_tot
                     )
+                # noinspection PyTypeChecker
                 l[j] = (k, mp)
             l.append((k_ref, mp_ref))
             for k, mp in l: motion_profiles[k] = mp
@@ -1245,7 +1253,7 @@ class TrajectoryPlanner:
         
         # After the motion profile of each moving axis is created to execute its
         # own displacement in the shortest possible travel time, we need to 
-        # synchronize these motion profiles so they all share the same total
+        # synchronize these motion profiles, so they all share the same total
         # travel time, equal to the maximum of the individual travel times.
         motion_profiles = self._synchronize_motion_profiles(motion_profiles, find)
         return motion_profiles        
@@ -1293,14 +1301,14 @@ class TrajectoryPlanner:
         # Get the coordinates of points on the actual segment path.
         axis_positions = get_axis_positions(moving_axes, num_points)
         
-        # Get the start- and end point of the segment.
+        # Get the start- and end point of the ideal straight-line segment.
         p0 = np.array([s_arr[0] for s_arr in axis_positions])
         p1 = np.array([s_arr[-1] for s_arr in axis_positions])
         dp = p1 - p0
         dp_norm_sq = np.dot(dp, dp)
 
-        # Calculate the deviation of the points on the actual segment path to the
-        # straight line segment and return the maximum of these deviations.
+        # Calculate deviations between points on the actual segment path and
+        # the ideal straight-line segment; return the maximum deviation.
         point_coords = np.vstack(axis_positions)
         _, num_cols = point_coords.shape
         max_dev = 0.0
@@ -1345,8 +1353,8 @@ class TrajectoryPlanner:
             Indicates whether the start or end velocities of the segments in the
             trajectory are being determined.
         allowed_path_deviation
-            The allowable (maximum) segment path deviation in linear axis
-            displacement units (this will depend on the units that were used to
+            The allowable (maximum) segment path deviation in units of linear 
+            axis displacement (this will depend on the units that were used to
             specify axis pitch, e.g. if pitch is in revs/meter, the deviation
             is expected to be in meters).
         num_points
@@ -1369,15 +1377,16 @@ class TrajectoryPlanner:
                 return delta ** 2
             except ValueError:
                 return 1e10
-
-        upper_bound = max(self.vx_m, self.vy_m, self.vz_m)
+        
+        motion_profiles = self._minimize_segment_profile_time(moving_axes, find)
+        upper_bound = min(mp.v_top for mp in motion_profiles.values())
         result = minimize_scalar(fn, bounds=(1.0, upper_bound), method="bounded")
         if result.success:
             for k, axisdata in moving_axes.items():
                 axisdata.omega_m = result.x
             motion_profiles = self._minimize_segment_profile_time(moving_axes, find)
             return motion_profiles
-        raise ValueError(f"Optimization of path deviation failed: {result.message}")
+        raise ValueError(f"Segment optimization failed: {result.message}")
 
     def _create_motion_profiles(
         self,

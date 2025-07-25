@@ -37,7 +37,7 @@ class MPMCProcess(multiprocessing.Process):
     config_callback : Callable[[StepperMotor], None], optional
         Function to configure the `StepperMotor` instance after its 
         instantiation (e.g., set microstepping, current limits).
-    name : str, optional
+    motor_name : str, optional
         Identifier for logging and debugging purposes.
     """
     def __init__(
@@ -46,14 +46,14 @@ class MPMCProcess(multiprocessing.Process):
         motor_class: type[StepperMotor],
         motor_kwargs: dict[str, Any],
         config_callback: Callable[[TStepperMotor], None] | None = None,
-        name: str = "MPMC"
+        motor_name: str = "MPMC"
     ) -> None:
         super().__init__(daemon=True)
         self.conn = conn
         self.motor_class = motor_class
         self.motor_kwargs = motor_kwargs
         self.config_callback = config_callback
-        self.name = name
+        self.motor_name = motor_name
 
     def run(self) -> None:
         """
@@ -75,7 +75,7 @@ class MPMCProcess(multiprocessing.Process):
             motor.logger.error(error_msg)
             self.conn.send({
                 "status": "startup_error",
-                "name": self.name,
+                "name": self.motor_name,
                 "message": error_msg
             })
             return
@@ -99,12 +99,12 @@ class MPMCProcess(multiprocessing.Process):
                 profile: MotionProfile = msg["profile"]
                 direction: str = msg.get("direction", "forward")
                 if direction == "forward":
-                    motor.rotator.preprocess(RotationDirection.COUNTERCLOCKWISE, profile)
+                    motor.rotator.preprocess(RotationDirection.CCW, profile)
                 else:
-                    motor.rotator.preprocess(RotationDirection.CLOCKWISE, profile)
+                    motor.rotator.preprocess(RotationDirection.CW, profile)
                 self.conn.send({
                     "status": "ready", 
-                    "name": self.name
+                    "name": self.motor_name
                 })
                 prepared = True
 
@@ -112,7 +112,7 @@ class MPMCProcess(multiprocessing.Process):
                 motor.rotator.rotate()
                 self.conn.send({
                     "status": "done", 
-                    "name": self.name, 
+                    "name": self.motor_name,
                     "travel_time": motor.rotator.moving_time
                 })
                 prepared = False
@@ -153,7 +153,7 @@ class SPMCProcess(multiprocessing.Process):
     config_callback : Callable[[StepperMotor], None], optional
         Function to apply configuration on the `StepperMotor` instance after 
         instantiation (e.g., set microstepping, current limits).
-    name : str, optional
+    motor_name : str, optional
         Process identifier for logging and debugging purposes.
     
     Communication messages between the external process and the `SPMCProcess` 
@@ -203,14 +203,14 @@ class SPMCProcess(multiprocessing.Process):
         motor_class: type[StepperMotor],
         motor_kwargs: dict[str, Any],
         config_callback: Callable[[TStepperMotor], None] | None = None,
-        name: str = "SPMC"
+        motor_name: str = "SPMC"
     ) -> None:
         super().__init__(daemon=True)
         self.conn = conn
         self.motor_class = motor_class
         self.motor_kwargs = motor_kwargs
         self.config_callback = config_callback
-        self.name = name
+        self.motor_name = motor_name
 
     def run(self) -> None:
         """
@@ -233,7 +233,7 @@ class SPMCProcess(multiprocessing.Process):
             motor.logger.error(error_msg)
             self.conn.send({
                 "status": "startup_error",
-                "name": self.name,
+                "name": self.motor_name,
                 "message": error_msg
             })
             return
@@ -254,12 +254,12 @@ class SPMCProcess(multiprocessing.Process):
 
             if cmd == "start_segment":
                 motor.rotator.delays = msg.get("delays", None)
-                motor.rotator.direction = msg.get("direction", RotationDirection.COUNTERCLOCKWISE)
+                motor.rotator.direction = msg.get("direction", RotationDirection.CCW)
                 if motor.rotator.delays is not None:
                     motor.rotator.rotate()
                     self.conn.send({
                         "status": "segment_done", 
-                        "name": self.name, 
+                        "name": self.motor_name,
                         "travel_time": motor.rotator.moving_time
                     })
 

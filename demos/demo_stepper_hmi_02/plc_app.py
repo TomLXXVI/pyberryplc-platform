@@ -17,8 +17,8 @@ class StepperMotorPLC(AbstractPLC):
         # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
             pin_config=PinConfig(
-                step_pin_ID=21,
-                dir_pin_ID=27
+                step_pin=21,
+                dir_pin=27
             ),
             logger=self.logger,
             name="motor X",

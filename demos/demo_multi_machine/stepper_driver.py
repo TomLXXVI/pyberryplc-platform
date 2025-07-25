@@ -52,8 +52,8 @@ class StepperDriver:
         # Instantiate a `TMC2208StepperMotor`
         stepper_motor = TMC2208StepperMotor(
             pin_config=PinConfig(
-                step_pin_ID=21,
-                dir_pin_ID=27
+                step_pin=21,
+                dir_pin=27
             ),
             logger=self.logger,
             name="STEPPER-DRIVER",
@@ -112,11 +112,11 @@ class StepperDriver:
         """
         # Movement from start position to end position.
         self.movement_in_progress = True
-        self.stepper_motor.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+        self.stepper_motor.rotator.direction = RotationDirection.CCW
         self.stepper_motor.rotator.rotate()  # blocking rotation
         
         # Movement back from end position to start position.
-        self.stepper_motor.rotator.direction = RotationDirection.CLOCKWISE
+        self.stepper_motor.rotator.direction = RotationDirection.CW
         self.stepper_motor.rotator.rotate()
         self.movement_in_progress = False
         

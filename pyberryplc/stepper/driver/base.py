@@ -1,7 +1,7 @@
 import typing
 from abc import ABC, abstractmethod
 from enum import StrEnum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 import logging
 import threading
@@ -80,7 +80,10 @@ class Rotator(ABC):
         """
         if self.motor.step:
             self.motor.step.write(True)
-            time.sleep(self._step_width)
+            # time.sleep(self._step_width)
+            end = time.perf_counter_ns() + self._step_width * 1.e9  # ns
+            while time.perf_counter_ns() < end:
+                pass
             self.motor.step.write(False)
 
 
@@ -303,8 +306,8 @@ class MotionProfileRotator(Rotator):
         """
         if self._motion_profile.ds_tot > 0.0:
             step_angle = self.motor.step_angle
-            final_angle = self._motion_profile.ds_tot + step_angle
-            num_steps = int(final_angle / step_angle)
+            final_angle = self._motion_profile.ds_tot  # + step_angle
+            num_steps = int(round(final_angle / step_angle))
             try:
                 angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
             except AttributeError:
@@ -374,8 +377,8 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
         """
         if self._motion_profile.ds_tot > 0.0:
             step_angle = self.motor.step_angle
-            final_angle = self._motion_profile.ds_tot + step_angle
-            num_steps = int(final_angle / step_angle)
+            final_angle = self._motion_profile.ds_tot   # + step_angle
+            num_steps = int(round(final_angle / step_angle))
             try:
                 angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
             except AttributeError:
@@ -543,39 +546,39 @@ class PinConfig:
 
     Attributes
     ----------
-    step_pin_ID : int
+    step_pin : int
         GPIO pin number for STEP signal.
-    dir_pin_ID : int
+    dir_pin : int
         GPIO pin number for DIR signal.
-    en_pin_ID : int | None, optional
+    en_pin : int | None, optional
         GPIO pin number for ENABLE signal (active-low). Default is None.
     """
-    step_pin_ID: int
-    dir_pin_ID: int
-    en_pin_ID: int | None = None
+    step_pin: int
+    dir_pin: int
+    en_pin: int | None = None
     use_pigpio: bool = False
     
     @property
     def step(self) -> DigitalOutput | DigitalOutputPigpio:
         if self.use_pigpio:
-            return DigitalOutputPigpio(self.step_pin_ID, "STEP")
+            return DigitalOutputPigpio(self.step_pin, "STEP")
         else:
-            return DigitalOutput(self.step_pin_ID, "STEP")
+            return DigitalOutput(self.step_pin, "STEP")
     
     @property
     def dir(self) -> DigitalOutput | DigitalOutputPigpio:
         if self.use_pigpio:
-            return DigitalOutputPigpio(self.dir_pin_ID, "DIR")
+            return DigitalOutputPigpio(self.dir_pin, "DIR")
         else:
-            return DigitalOutput(self.dir_pin_ID, "DIR")
+            return DigitalOutput(self.dir_pin, "DIR")
         
     @property
     def enable(self) -> DigitalOutput | DigitalOutputPigpio | None:
-        if self.en_pin_ID is not None:
+        if self.en_pin is not None:
             if self.use_pigpio:
-                return DigitalOutputPigpio(self.en_pin_ID, "EN", active_high=False)
+                return DigitalOutputPigpio(self.en_pin, "EN", active_high=False)
             else:
-                return DigitalOutput(self.en_pin_ID, "EN", active_high=False)
+                return DigitalOutput(self.en_pin, "EN", active_high=False)
         return None
     
 
@@ -589,22 +592,24 @@ class MicrostepPinConfig:
 
     Attributes
     ----------
-    ms1_pin_number : int | None, optional
+    ms1_pin : int | None, optional
         GPIO pin number for MS1. Default is None.
-    ms2_pin_number : int | None, optional
+    ms2_pin : int | None, optional
         GPIO pin number for MS2. Default is None.
-    ms3_pin_number : int | None, optional
+    ms3_pin : int | None, optional
         GPIO pin number for MS3. Default is None.
     use_pigpio:
         Indicates to use the `pigpio` library to control the GPIO pins of the
         Raspberry Pi (instead of the default higher-level `gpiozero` library).
-        In a multiprocessing context the use of the `pigpio` library is 
-        required.
+        In a multiprocessing context use of the `pigpio` library is required.
     """
-    ms1_pin_number: int | None = None
-    ms2_pin_number: int | None = None
-    ms3_pin_number: int | None = None
+    ms1_pin: int | None = None
+    ms2_pin: int | None = None
+    ms3_pin: int | None = None
     use_pigpio: bool = False
+    _ms1: DigitalOutput | DigitalOutputPigpio | None = field(default=None, init=False, repr=False)
+    _ms2: DigitalOutput | DigitalOutputPigpio | None = field(default=None, init=False, repr=False)
+    _ms3: DigitalOutput | DigitalOutputPigpio | None = field(default=None, init=False, repr=False)
     
     @property
     def ms1(self) -> DigitalOutput | DigitalOutputPigpio | None:
@@ -613,11 +618,16 @@ class MicrostepPinConfig:
         `DigitalOutputPigpio` object) to control the MS1-input of the intended
         stepper motor driver.
         """
-        if self.ms1_pin_number is not None:
+        if self.ms1_pin is not None and self._ms1 is None:
             if self.use_pigpio:
-                return DigitalOutputPigpio(self.ms1_pin_number, "MS1")
-            return DigitalOutput(self.ms1_pin_number, "MS1")
-        return None
+                self._ms1 = DigitalOutputPigpio(self.ms1_pin, "MS1")
+            else:
+                self._ms1 = DigitalOutput(self.ms1_pin, "MS1")
+            return self._ms1
+        elif self._ms1 is not None:
+            return self._ms1
+        else:
+            return None
     
     @property
     def ms2(self) -> DigitalOutput | DigitalOutputPigpio | None:
@@ -626,12 +636,17 @@ class MicrostepPinConfig:
         `DigitalOutputPigpio` object) to control the MS2-input of the intended
         stepper motor driver.
         """
-        if self.ms2_pin_number is not None:
+        if self.ms2_pin is not None and self._ms2 is None:
             if self.use_pigpio:
-                return DigitalOutputPigpio(self.ms2_pin_number, "MS2")
-            return DigitalOutput(self.ms2_pin_number, "MS2")
-        return None
-
+                self._ms2 = DigitalOutputPigpio(self.ms2_pin, "MS2")
+            else:
+                self._ms2 = DigitalOutput(self.ms2_pin, "MS2")
+            return self._ms2
+        elif self._ms2 is not None:
+            return self._ms2
+        else:
+            return None
+    
     @property
     def ms3(self) -> DigitalOutput | DigitalOutputPigpio | None:
         """
@@ -639,11 +654,16 @@ class MicrostepPinConfig:
         `DigitalOutputPigpio` object) to control the MS3-input of the intended
         stepper motor driver.
         """
-        if self.ms3_pin_number is not None:
+        if self.ms3_pin is not None and self._ms3 is None:
             if self.use_pigpio:
-                return DigitalOutputPigpio(self.ms3_pin_number, "MS3")
-            return DigitalOutput(self.ms3_pin_number, "MS3")
-        return None
+                self._ms3 = DigitalOutputPigpio(self.ms3_pin, "MS3")
+            else:
+                self._ms3 = DigitalOutput(self.ms3_pin, "MS3")
+            return self._ms3
+        elif self._ms3 is not None:
+            return self._ms3
+        else:
+            return None
 
 
 class MicrostepConfig:

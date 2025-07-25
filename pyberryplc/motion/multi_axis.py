@@ -195,6 +195,7 @@ class MotionProfile(ABC):
         self.ds_f: float = 0.0
         self.ds_cov: float = 0.0
         self.dt_cov: float = 0.0
+        
         if ds_tot == 0.0 and dt_tot is not None:
             # applies to a non-moving axis: dt_tot and dt_cov indicate the time
             # the axis remains at rest
@@ -203,20 +204,26 @@ class MotionProfile(ABC):
         if ds_tot > 0.0:
             if dt_tot is None:
                 # method 1: without time constraint
-                v_top = v_m
-                if v_f and v_i is not None:
-                    dv = v_f - v_i
-                    if dv > 0.0: v_top = v_f
-                    if dv < 0.0: v_top = v_i
                 self.a_top = self.a_m
-                self.v_top = self._calc_v_top1(v_top)
+                v_top_ini = v_m   # initial top velocity = maximum velocity
+                if v_f and v_i is not None:
+                    # both boundary velocities (initial and final) are known
+                    # -> total velocity change of the movement is known
+                    dv = v_f - v_i  
+                    if dv > 0.0: v_top_ini = v_f  # initial top velocity is limited to final velocity
+                    if dv < 0.0: v_top_ini = v_i  # initial top velocity is limited to initial velocity
+                    # if dv == 0.0: final top velocity can be anywhere between 0.0 and maximum velocity
+                # find final top velocity for which there is no constant-velocity phase =
+                # highest attainable velocity at which the travel distance can be made.
+                self.v_top = self._calc_v_top1(v_top_ini)
             else:
-                # method 2: with time constraint (for time synchronisation of 
-                # multiple axes)
+                # method 2: with time constraint (when time-synchronizing 
+                # multi-axis motion)
                 self.a_top = self.a_m
                 self.v_top = self._calc_v_top2(dt_tot, self.a_top)
                 # self.a_top, self.v_top = self._calc_v_top3(dt_tot)
-    
+            
+            # Determine all characteristics of the motion profile.    
             self.dv_i = self._calc_dv_i(self.v_top)
             self.dt_i = self.get_dt_acc(self.dv_i, self.a_top)
             self.ds_i = self._calc_ds_i(self.a_top, self.dv_i, self.dt_i)
@@ -316,6 +323,8 @@ class MotionProfile(ABC):
                 raise ValueError("Could not find a suitable top velocity.")
         
         if self.ds_tot == 0.0: return 0.0
+        # First calculate the travel distance at constant velocity at the 
+        # initially given top velocity
         ds_cov = self._calc_ds_cov(v_top_ini, self.a_top)
         if ds_cov < 0.0:
             v_top = _search_top_velocity1(self.a_top)
@@ -329,7 +338,7 @@ class MotionProfile(ABC):
         seconds when the acceleration is `a_top`.
         """
         def limit_dt_cov() -> float:
-
+            # Find v_top for which dt_cov becomes zero.
             def _f(v_top):
                 dv_i = self._calc_dv_i(v_top)
                 dv_f = self._calc_dv_f(v_top)
@@ -350,7 +359,7 @@ class MotionProfile(ABC):
                 return self.v_m
 
         def limit_ds_cov() -> float:
-
+            # Find v_top for which ds_cov becomes zero.
             def _f(v_top):
                 dv_i = self._calc_dv_i(v_top)
                 dv_f = self._calc_dv_f(v_top)
@@ -679,7 +688,7 @@ class MotionProfile(ABC):
     def get_velocity_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` and returns the
-        velocity `v` at that time moment (`0 <= t <= dt_tot`).
+        velocity `velocity` at that time moment (`0 <= t <= dt_tot`).
         """
         t_ax, v_ax = self.velocity_profile()
         interp = interp1d(t_ax, v_ax)
@@ -734,7 +743,7 @@ class MotionProfile(ABC):
     def get_ini_velocity_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` in seconds and
-        returns the velocity `v` at that moment during the initial acceleration
+        returns the velocity `velocity` at that moment during the initial acceleration
         phase of the movement (`0 <= t <= dt_i`).
 
         If `t > dt_i`, the velocity at `dt_i` is returned (i.e. the top velocity
@@ -764,7 +773,7 @@ class MotionProfile(ABC):
     ) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` in seconds and returns
-        the velocity `v` at that moment during the final acceleration phase of
+        the velocity `velocity` at that moment during the final acceleration phase of
         the movement (`t0 <= t <= t0 + dt_f`).
 
         If `t > t0 + dt_f`, a velocity of zero is returned.
@@ -851,7 +860,7 @@ class MotionProfile(ABC):
         # Between t0 and t1 it is possible for the velocity to become negative
         # depending on the initial conditions.
         if v_arr[-1] < 0.0:
-            # Find time `t1` where `v = 0`
+            # Find time `t1` where `velocity = 0`
             t_pos = t_arr[v_arr > 0][-1]
             t_neg = t_arr[v_arr < 0][0]
             interp_t = interp1d(t_arr, v_arr)
@@ -933,16 +942,16 @@ class SCurvedProfile(MotionProfile):
 
 
 class RotationDirection(StrEnum):
-    CLOCKWISE = "clockwise"
-    COUNTERCLOCKWISE = "counterclockwise"
+    CW = "clockwise"
+    CCW = "counterclockwise"
 
     def to_bool(self) -> bool:
         """Returns True for counterclockwise, False for clockwise."""
-        return self == RotationDirection.COUNTERCLOCKWISE
+        return self == RotationDirection.CCW
 
     def to_int(self) -> int:
         """Returns 1 for counterclockwise, -1 for clockwise."""
-        if self == RotationDirection.CLOCKWISE:
+        if self == RotationDirection.CW:
             return -1
         return 1
     
@@ -953,9 +962,9 @@ class RotationDirection(StrEnum):
         raise TypeError("Use .to_bool() for explicit conversion.")
     
     def __invert__(self) -> 'RotationDirection':
-        if self == RotationDirection.COUNTERCLOCKWISE:
-            return RotationDirection.CLOCKWISE
-        return RotationDirection.COUNTERCLOCKWISE
+        if self == RotationDirection.CCW:
+            return RotationDirection.CW
+        return RotationDirection.CCW
     
     def toggle(self) -> 'RotationDirection':
         return ~self

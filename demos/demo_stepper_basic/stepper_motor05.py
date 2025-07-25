@@ -27,15 +27,15 @@ class StepperUARTTestPLC(AbstractPLC):
         # Set up stepper motor driver
         self.stepper = TMC2208StepperMotor(
             pin_config=PinConfig(
-                step_pin_ID=21,
-                dir_pin_ID=27
+                step_pin=21,
+                dir_pin=27
             ),
             logger=self.logger,
             name="motor X",
             uart=TMC2208UART(port="/dev/ttyUSB1")
         )
         self.stepper.attach_rotator(RotatorType.MOTION_PROFILE_THREADED)
-        self.stepper.direction = RotationDirection.COUNTERCLOCKWISE
+        self.stepper.direction = RotationDirection.CCW
         self.stepper.rotator.profile = TrapezoidalProfile(
             ds_tot=180,
             dt_tot=1,
@@ -78,7 +78,7 @@ class StepperUARTTestPLC(AbstractPLC):
                 self.X1.deactivate()
                 self.X2.activate()
 
-            if self.X2.active and self.key_input.is_pressed("q"):
+            if self.X2.active and self.key_input.is_pressed("position"):
                 self.logger.info("Back to idle")
                 self.X2.deactivate()
                 self.X0.activate()
@@ -88,14 +88,14 @@ class StepperUARTTestPLC(AbstractPLC):
             self.logger.info("Press 's' to start motor")
 
         if self.X1.rising_edge:
-            self.stepper.rotator.direction = RotationDirection.COUNTERCLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CCW
             self.stepper.rotator.start()
             self.logger.info("Press 'r' to start motor in reverse")
 
         if self.X2.rising_edge:
-            self.stepper.rotator.direction = RotationDirection.CLOCKWISE
+            self.stepper.rotator.direction = RotationDirection.CW
             self.stepper.rotator.start()
-            self.logger.info("Press 'q' to go back to idle")
+            self.logger.info("Press 'position' to go back to idle")
 
     def control_routine(self):
         self.key_input.update()

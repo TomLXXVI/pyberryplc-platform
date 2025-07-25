@@ -52,10 +52,10 @@ def main():
         pitch=250,  # revs/m
         profile_type=SCurvedProfile,
         a_m=1000.0,  # deg/s2
-        v_m=360.0,  # deg/s
+        v_m=1000.0,  # deg/s
         x_motor=StepperMotorMock(full_steps_per_rev=200, microstep_factor=1),
         y_motor=StepperMotorMock(full_steps_per_rev=200, microstep_factor=1),
-        y_rdir_pos=RotationDirection.CLOCKWISE
+        y_rdir_pos=RotationDirection.CW
     )
     trajectory = planner.get_trajectory(
         *points, 

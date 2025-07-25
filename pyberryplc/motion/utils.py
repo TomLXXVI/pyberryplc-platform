@@ -155,14 +155,26 @@ def get_2Dsegment_path(
     pair:
         Tuple with the start point and the end point of the segment.
     """
-    thetax_fn = np.vectorize(segment.mp_x.get_position_time_fn())
+    thetax_fn = np.vectorize(segment.mp_x.get_position_time_fn())  # returns position at a given time moment
     thetay_fn = np.vectorize(segment.mp_y.get_position_time_fn())
+
+    # Create an array of linearly spaced time moments
     t_arr = np.linspace(0.0, segment.mp_x.dt_tot, num_points)
 
+    # Calculate the linear x-coordinate corresponding with each time moment in 
+    # `t_arr`. Note that axis motion profiles don't know about the direction of 
+    # movement (they always assume movement in the positive direction, i.e.
+    # the displacement between any two time moments is an absolute value).
     x_arr = thetax_fn(t_arr) / (360.0 * segment.segmentdata.xpitch)
+
+    # Calculate the displacement dx from the initial position x0 at each time
+    # moment t, taking the direction of movement into account. A displacement dx
+    # is then negative if the direction of movement is negative. 
     x0_arr = np.full_like(x_arr, x_arr[0])
     mx = -1 if segment.rdir_x == ~segment.segmentdata.rdir_pos_x else 1
     dx_arr = (x_arr - x0_arr) * mx
+    
+    # Recalculate the x-coordinates taking the direction of movement into account.
     x_arr = x0_arr + dx_arr
 
     y_arr = thetay_fn(t_arr) / (360.0 * segment.segmentdata.ypitch)
@@ -428,8 +440,8 @@ def minimize_profile_time(
         alpha_m=a_m,
         omega_i=v_i,
         omega_f=v_f,
-        rdir=RotationDirection.COUNTERCLOCKWISE,
-        rdir_pos=RotationDirection.COUNTERCLOCKWISE,
+        rdir=RotationDirection.CCW,
+        rdir_pos=RotationDirection.CCW,
         pitch=0.0,
         dt_tot=0.0,
         mp=None
