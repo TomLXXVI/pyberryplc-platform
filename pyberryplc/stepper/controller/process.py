@@ -3,11 +3,11 @@ import multiprocessing
 # noinspection PyProtectedMember
 from multiprocessing.connection import Connection
 
-from pyberryplc.motion.multi_axis import MotionProfile
+from pyberryplc.motion import MotionProfile, RotationDirection
 from pyberryplc.stepper.driver.base import (
     StepperMotor, 
-    RotationDirection, 
     TwoStageMotionProfileRotator,
+    DynamicRotatorThreaded,
     TStepperMotor
 )
 
@@ -97,8 +97,8 @@ class MPMCProcess(multiprocessing.Process):
             
             if cmd == "prepare_profile":
                 profile: MotionProfile = msg["profile"]
-                direction: str = msg.get("direction", "forward")
-                if direction == "forward":
+                direction: str = msg.get("direction", "ccw")
+                if direction == "ccw":
                     motor.rotator.preprocess(RotationDirection.CCW, profile)
                 else:
                     motor.rotator.preprocess(RotationDirection.CW, profile)
@@ -113,7 +113,7 @@ class MPMCProcess(multiprocessing.Process):
                 self.conn.send({
                     "status": "done", 
                     "name": self.motor_name,
-                    "travel_time": motor.rotator.moving_time
+                    "travel_time": motor.rotator.travel_time
                 })
                 prepared = False
 
@@ -160,16 +160,26 @@ class SPMCProcess(multiprocessing.Process):
     are dictionaries. The external process sends commands to the `SPMCProcess`
     and receives status feedback messages back from the `SPMCProcess`. 
     
-    The `SPMCProcess` understands two commands:
+    The `SPMCProcess` understands the following commands:
     
     1.  Command to execute a movement of the axis.
         ```
-        {"cmd": "start_segment", "delays": <list[float]>, "direction": <RotationDirection>}
+        {"cmd": "start_motion", "delays": <list[float]>, "direction": <RotationDirection>}
         ```
         - Key "delays" must carry a list with the time delays between the step pulses.
         - Key "direction" must indicate the rotation direction of the axis.
-        
-    2.  Command to shutdown the process.
+
+    2.  Command to turn jog mode on.
+        ```
+        {"cmd": "start_jog", "direction": <RotationDirection>}
+        ```
+
+    3.  Command to turn jog mode off.
+        ```
+        {"cmd": "stop_jog"}
+        ```
+
+    4.  Command to shutdown the process.
         ```
         {"cmd": "shutdown"}
         ```
@@ -177,22 +187,32 @@ class SPMCProcess(multiprocessing.Process):
     The `SPMCProcess` returns the following status feedback messages back to the
     external process:
     
-    1.  In response to command "start_segment" it returns a status feedback 
+    1.  In response to command "start_motion" it returns a status feedback
         message to signal that the axis movement is finished.
         ```
-        {"status": "segment_done", "name": <str>, "travel_time": <float>}
+        {"status": "motion_done", "name": <str>, "travel_time": <float>}
         ```
-        - Key "name" contains the name given to the `SPMCProcess`.
+        - Key "name" contains the motor name given to the `SPMCProcess`.
         - Key "travel_time" returns the travel time of the executed movement.
-    
-    2.  If an exception is raised when instantiating or configuring the 
+
+    2.  In response to command "start_jog":
+        ```
+        {"status": "jog_started", "name": <str>, "message": <str>}
+        ```
+
+    3.  In response to command "stop_jog":
+        ```
+        {"status": "jog_stopped", "name": <str>, "message": <str>}
+        ```
+
+    4.  If an exception is raised when instantiating or configuring the
         `StepperMotor` instance, the following status feedback message is sent:
         ```
         {"status": "startup_error", "name": <str>, "message": <str>}
         ```
         - Key "message" contains the type of exception and its description.
     
-    3.  If an unknown command is send, the `SPMCProcess` responds with:
+    5.  If an unknown command is send, the `SPMCProcess` responds with:
         ```
         {"status": "error", "message": f"Unknown command: {cmd}"}
         ```
@@ -203,7 +223,8 @@ class SPMCProcess(multiprocessing.Process):
         motor_class: type[StepperMotor],
         motor_kwargs: dict[str, Any],
         config_callback: Callable[[TStepperMotor], None] | None = None,
-        motor_name: str = "SPMC"
+        motor_name: str = "_",
+        jog_mode_profile: MotionProfile | None = None
     ) -> None:
         super().__init__(daemon=True)
         self.conn = conn
@@ -211,15 +232,18 @@ class SPMCProcess(multiprocessing.Process):
         self.motor_kwargs = motor_kwargs
         self.config_callback = config_callback
         self.motor_name = motor_name
+        self.jog_mode_profile = jog_mode_profile
+        self._jog_mode_active: bool = False
 
     def run(self) -> None:
         """
         Runs the motor process. First, a motor is instantiated and configured, 
         then the message loop is entered, waiting for commands to execute.
         """
-        # Instantiate the stepper motor and its rotator.
+        # Instantiate the stepper motor and its rotators.
         motor = self.motor_class(**self.motor_kwargs)
-        motor.rotator = TwoStageMotionProfileRotator(motor)
+        motion_profile_rotator = TwoStageMotionProfileRotator(motor)
+        dynamic_rotator = DynamicRotatorThreaded(motor)
 
         # Enable motor driver and set motor driver settings on the driver 
         # through a callback function.
@@ -229,7 +253,7 @@ class SPMCProcess(multiprocessing.Process):
             else:
                 motor.enable()
         except Exception as e:
-            error_msg = f"{type(e).__name__}: {e}"
+            error_msg = f"[{self.motor_name}] {type(e).__name__}: {e}"
             motor.logger.error(error_msg)
             self.conn.send({
                 "status": "startup_error",
@@ -252,15 +276,40 @@ class SPMCProcess(multiprocessing.Process):
 
             cmd = msg.get("cmd")
 
-            if cmd == "start_segment":
+            if cmd == "start_motion":
+                self._jog_mode_active = False
+                motor.rotator = motion_profile_rotator
                 motor.rotator.delays = msg.get("delays", None)
                 motor.rotator.direction = msg.get("direction", RotationDirection.CCW)
                 if motor.rotator.delays is not None:
                     motor.rotator.rotate()
                     self.conn.send({
-                        "status": "segment_done", 
+                        "status": "motion_done",
                         "name": self.motor_name,
-                        "travel_time": motor.rotator.moving_time
+                        "travel_time": motor.rotator.travel_time
+                    })
+
+            elif cmd == "start_jog":
+                if self.jog_mode_profile is not None:
+                    self._jog_mode_active = True
+                    motor.rotator = dynamic_rotator
+                    motor.rotator.profile = self.jog_mode_profile
+                    motor.rotator.direction = msg.get("direction", RotationDirection.CCW)
+                    motor.rotator.start()
+                    self.conn.send({
+                        "status": "jog_started",
+                        "name": self.motor_name,
+                        "message": "jog mode turned on"
+                    })
+
+            elif cmd == "stop_jog":
+                if isinstance(motor.rotator, DynamicRotatorThreaded) and self._jog_mode_active:
+                    motor.rotator.stop()
+                    self._jog_mode_active = False
+                    self.conn.send({
+                        "status": "jog_stopped",
+                        "name": self.motor_name,
+                        "message": "jog mode turned off"
                     })
 
             elif cmd == "shutdown":
@@ -269,6 +318,7 @@ class SPMCProcess(multiprocessing.Process):
 
             else:
                 self.conn.send({
-                    "status": "error", 
+                    "status": "error",
+                    "name": self.motor_name,
                     "message": f"Unknown command: {cmd}"
                 })

@@ -1,4 +1,4 @@
-from pyberryplc.motion.multi_axis import MotionProfile
+from pyberryplc.motion import MotionProfile
 
 
 class DynamicDelayGenerator:

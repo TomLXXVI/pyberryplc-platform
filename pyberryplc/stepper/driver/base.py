@@ -10,7 +10,7 @@ from collections import deque
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
 from pyberryplc.stepper.driver.dynamic_generator import DynamicDelayGenerator
 
-from pyberryplc.motion.multi_axis import MotionProfile, RotationDirection
+from pyberryplc.motion import MotionProfile, RotationDirection
 
 
 class Rotator(ABC):
@@ -60,7 +60,7 @@ class Rotator(ABC):
         return self._busy
     
     @property
-    def moving_time(self) -> float:
+    def travel_time(self) -> float:
         """
         Returns the time duration of the rotation.
         """
@@ -411,9 +411,14 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
         Starts the rotation in a background thread.
         """
         if self._motion_profile is None:
-            raise ValueError("Motion profile must be set before starting.")
+            raise ValueError(
+                "Motion profile must be set before starting."
+            )
         self._generate_delays()
-        self._thread = threading.Thread(target=self._step_loop, daemon=True)
+        self._thread = threading.Thread(
+            target=self._step_loop,
+            daemon=True
+        )
         self._thread.start()
 
 
@@ -823,7 +828,10 @@ class StepperMotor(typing.Generic[TRotator], ABC):
             If the provided resolution is not supported by the MicrostepConfig.
         """
         if not self.microstep_config:
-            raise RuntimeError("MicrostepConfig must be set before configuring resolution.")
+            raise RuntimeError(
+                "MicrostepConfig must be set before "
+                "configuring resolution."
+            )
         self.full_steps_per_rev = full_steps_per_rev
         if ms_pins:
             self.microstep_config.pin_config = ms_pins

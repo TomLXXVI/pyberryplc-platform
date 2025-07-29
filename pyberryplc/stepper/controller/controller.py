@@ -4,7 +4,6 @@ from multiprocessing import Pipe
 import tomllib
 import json
 from pathlib import Path
-from abc import abstractmethod
 from dataclasses import dataclass
 
 from pyberryplc.stepper.driver.base import StepperMotor, PinConfig, TStepperMotor
@@ -12,8 +11,9 @@ from pyberryplc.stepper.driver.tmc2208 import TMC2208StepperMotor
 from pyberryplc.stepper.uart.tmc2208_uart import TMC2208UART
 from pyberryplc.stepper.controller.process import SPMCProcess
 
-from pyberryplc.core import MemoryVariable, CounterUp, AbstractPLC, HMISharedData
-from pyberryplc.motion.profile import RotationDirection
+from pyberryplc.motion.profile import RotationDirection, MotionProfile
+
+from pyberryplc.core import MemoryVariable, CounterUp, TAbstractPLC
 
 
 class MotorController:
@@ -32,6 +32,7 @@ class MotorController:
         cfg_callback: Callable[[TStepperMotor], None] | None = None,
         comm_port: str = "",
         logger: logging.Logger | None = None,
+        jog_mode_profile: MotionProfile | None = None
     ) -> None:
         """
         Creates a `SPMotorController` instance.
@@ -59,6 +60,8 @@ class MotorController:
         logger:
             `Logger` instance to send log messages from the concrete 
             `StepperMotor` instance to a logfile and/or to the console.
+        jog_mode_profile:
+            Motion profile for acceleration/deceleration in jog mode.
         """
         self.motor_name = motor_name
         self.motor_class = motor_class
@@ -66,22 +69,24 @@ class MotorController:
         self.cfg_callback = cfg_callback
         self.comm_port = comm_port
         self.logger = logger
+        self.jog_mode_profile = jog_mode_profile
 
-        self._motor_busy = MemoryVariable(False, False)
-        self._motor_ready = MemoryVariable(False, False)
-        self._travel_time = MemoryVariable(float("nan"), float("nan"))
+        self._motions_finished = MemoryVariable(True)
+        self._motor_ready = MemoryVariable(True)
+        self._travel_time = MemoryVariable(float("nan"))
+        self._jog_mode_active = MemoryVariable(False)
 
-        self.segment_counter = CounterUp()
-        self.num_segments: int = 0
+        self.move_counter = CounterUp()
+        self.num_moves: int = 0
 
-        self._create_spmc_process()
+        self._create_process()
     
-    def _create_spmc_process(self) -> None:
+    def _create_process(self) -> None:
         """
         Creates the `SPMCProcess` that will be controlled by the 
         `SPMotorController`.
         """
-        self.com_interface, _spmc_endpoint = Pipe()
+        self.comm_interface, _proc_endpoint = Pipe()
 
         motor_kwargs: dict[str, Any] = {
             "pin_config": self.pin_config,
@@ -94,34 +99,33 @@ class MotorController:
         if c1 and c2:
             motor_kwargs["uart"] = TMC2208UART(port=self.comm_port)
 
-        self._mc_process = SPMCProcess(
-            conn=_spmc_endpoint,
+        self._process = SPMCProcess(
+            conn=_proc_endpoint,
             motor_class=self.motor_class,
             motor_kwargs=motor_kwargs,
             config_callback=self.cfg_callback,
-            motor_name=self.motor_name
+            motor_name=self.motor_name,
+            jog_mode_profile=self.jog_mode_profile
         )
-        
+
     def enable(self) -> None:
         """
         Starts the `run()` method of the `SPMCProcess`. After this function
         has been called, messages (commands) can be send to the `SPMCProcess`.
         """
-        self._mc_process.start()
-        # Signal that the motor is ready to rotate.
-        self._motor_ready.update(True)
-        
+        self._process.start()
+
     def shutdown(self) -> None:
         """
         Sends shutdown command to the `SPMPProcess`. 
         """
-        self.com_interface.send({"cmd": "shutdown"})
+        self.comm_interface.send({"cmd": "shutdown"})
     
     def disable(self) -> None:
         """
         Disables or closes the `SPMPProcess` by calling its `join()` method.
         """
-        self._mc_process.join()
+        self._process.join()
     
     def _set_status(self, msg: dict[str, Any]) -> None:
         """
@@ -130,28 +134,29 @@ class MotorController:
         """
         status = msg.get("status")
         
-        if status == "segment_done":
-            # A rotation is completed: report its travel time via the logger.
+        if status == "motion_done":
+            # A motion is completed:
+            self.move_counter.count_up()
+            # Report its travel time through the logger:
             travel_time = msg.get("travel_time", float("nan"))
             self._travel_time.update(travel_time)
             self.logger.info(
                 f"[{self.motor_name}] "
-                f"segment {self.segment_counter.value + 1}: "
+                f"movement {self.move_counter.value}: "
                 f"travel time {self.motor_name} = "
                 f"{self._travel_time.state:.3f} s"
             )
-            if self.segment_counter.value < self.num_segments - 1:
-                # Signal that the motor has finished a rotation and is ready to 
+            if self.move_counter.value < self.num_moves:
+                # Signal that the motor has finished a movement and is ready to
                 # accept a new rotation command.
                 self._motor_ready.update(True)
-                self.segment_counter.count_up()
+                self._motions_finished.update(False)
             else:
-                # Signal that all rotations are completed (the motor is not
-                # "busy" anymore), but stays ready to accept a new rotation
-                # command.
+                # Signal that all movements are completed, but that the motor
+                # stays ready to accept a new rotation command.
                 self._motor_ready.update(True)
-                self._motor_busy.update(False)
-                self.segment_counter.reset()
+                self._motions_finished.update(True)
+                self.move_counter.reset()
         
         elif status == "startup_error":
             # Report that the `SPMPProcess` failed during startup.
@@ -160,23 +165,42 @@ class MotorController:
                 f"{msg.get('message', 'No message')}"
             )
             raise RuntimeError(f"Startup error in {self.motor_name}")
-    
+
+        elif status == "jog_started":
+            self._jog_mode_active.update(True)
+            self.logger.info(
+                f"[{self.motor_name}] {msg.get('message', '')}"
+            )
+
+        elif status == "jog_stopped":
+            self._jog_mode_active.update(False)
+            self.logger.info(
+                f"[{self.motor_name}] {msg.get('message', '')}"
+            )
+
+        elif status == "error":
+            self.logger.info(
+                f"[{self.motor_name}] {msg.get('message', '')}"
+            )
+
     def update_status(self) -> None:
         """
         When this method is called, the `SPMotorController` requests a status 
-        update from its internal `SPMCProcess`.
+        update from its internal `SPMCProcess`. Updated status info can then be
+        read through properties `motions_finished`, `motor_ready`, `travel_time`,
+        and `jog_mode_active`.
         """
-        if self.com_interface.poll():
-            msg = self.com_interface.recv()
+        if self.comm_interface.poll():
+            msg = self.comm_interface.recv()
             self._set_status(msg)
     
     @property
-    def motor_busy(self) -> bool | int:
+    def motions_finished(self) -> bool | int:
         """
-        Indicates whether the motor has completed the current trajectory, i.e.
-        all of its rotations are done (returns `False`), or not (returns `True`).
+        Indicates whether the motor has completed all its motions in the current
+        trajectory.
         """
-        return self._motor_busy.state
+        return self._motions_finished.state
     
     @property
     def motor_ready(self) -> bool | int:
@@ -192,8 +216,15 @@ class MotorController:
         Returns the currently stored travel time of the motor.
         """
         return self._travel_time.state
-    
-    def send_stepper_signal(
+
+    @property
+    def jog_mode_active(self) -> bool:
+        """
+        Indicates whether jog mode is active.
+        """
+        return self._jog_mode_active.state
+
+    def move(
         self, 
         step_pulses: list[float],
         rdir: RotationDirection
@@ -202,33 +233,64 @@ class MotorController:
         Sends the step pulse signal to the `SPMCProcess` to start a new
         rotation.
         """
-        # If it is the first rotation of the trajectory, turn the motor state 
-        # to "busy".
-        if self.segment_counter.value == 0: 
-            self._motor_busy.update(True)
-        
-        # Indicate that the motor is not ready anymore.
-        self._motor_ready.update(False)
-        
-        self.com_interface.send({
-            "cmd": "start_segment",
-            "delays": step_pulses,
-            "direction": rdir
-        })
+        # When a move-command is given, `self.motor_ready` must be set to False
+        # to signal that a move-command is busy. When the move-command is
+        # completed, it will be signaled by the process (see method
+        # `_set_status()`) and `self.motor_ready` is then set to True again.
+        if self._motor_ready.state:
+            self._motor_ready.update(False)
+
+            self.comm_interface.send({
+                "cmd": "start_motion",
+                "delays": step_pulses,
+                "direction": rdir
+            })
+
+    def start_jog_mode(self, rdir: RotationDirection) -> None:
+        """
+        Turns jog mode on.
+        """
+        if self.motor_ready and self.motions_finished:
+            self.comm_interface.send({
+                "cmd": "start_jog",
+                "direction": rdir
+            })
+
+    def stop_jog_mode(self) -> None:
+        """
+        Turns jog mode off.
+        """
+        if self.jog_mode_active:
+            self.comm_interface.send({
+                "cmd": "stop_jog"
+            })
+
+    def set_init_state_trajectory(self, num_moves: int) -> None:
+        """
+        Sets the initial state of the controller when a series of consecutive
+        movements in a trajectory is to be performed.
+        """
+        self.num_moves = num_moves
+        self.move_counter.reset()
+        # When the first move-command is given, `self_motions_finished` must be
+        # reset to False and will become True again when all motor movements
+        # are completed (see method `_set_status()`).
+        self._motions_finished.update(False)
 
 
 @dataclass
 class MotorStatus:
     """
-    Holds the status attributes of a motor (controller).
+    Holds the status attributes of a single motor (controller).
     """
-    ready: bool = False
-    busy: bool = False
+    ready: bool = True
+    motions_finished: bool = True
     travel_time: float = float("nan")
+    jog_mode_active: bool = False
 
 
 @dataclass
-class MotionControlStatus:
+class MotionStatus:
     """
     Holds the status attributes of the individual motors and maps them to global 
     status attributes of the motion control through properties.  
@@ -241,7 +303,7 @@ class MotionControlStatus:
         self.motor_statuses = tuple(s for s in (self.x, self.y, self.z) if s is not None)
     
     @property
-    def ready(self) -> bool:
+    def all_ready(self) -> bool:
         """
         Returns `True` when all motors are ready, else `False`.
         """
@@ -250,11 +312,11 @@ class MotionControlStatus:
         return False
     
     @property
-    def busy(self) -> bool:
+    def all_finished(self) -> bool:
         """
-        Returns `True` when any motor is still busy, else `False`.
+        Returns `True` when all motor movements are finished, else `False`.
         """
-        if any([m.busy for m in self.motor_statuses]):
+        if all([m.motions_finished for m in self.motor_statuses]):
             return True
         return False
     
@@ -265,6 +327,15 @@ class MotionControlStatus:
         """
         travel_time = max([m.travel_time for m in self.motor_statuses])
         return travel_time
+
+    @property
+    def jog_mode_active(self) -> bool:
+        """
+        Returns `True` when any motor is in jog mode, else `False`.
+        """
+        if any([m.jog_mode_active for m in self.motor_statuses]):
+            return True
+        return False
 
 
 class XYZMotionController:
@@ -277,9 +348,10 @@ class XYZMotionController:
     """
     def __init__(
         self,
-        master: 'XYZMotionPLC',
+        master: TAbstractPLC,
         config_filepath: str = "motor_config.toml",
-        logger: logging.Logger | None = None
+        logger: logging.Logger | None = None,
+        jog_mode_profile: MotionProfile | None = None
     ) -> None:
         """
         Creates a `XYZMotionController` instance.
@@ -294,11 +366,14 @@ class XYZMotionController:
         logger:
             `Logger` instance to send log messages from the motor controllers to
              a file and/or to the console.
+        jog_mode_profile:
+            Motion profile for acceleration/deceleration in jog mode.
         """
         self.master = master
         self.motor_class: type[StepperMotor] = TMC2208StepperMotor
         self.config_filepath = config_filepath
         self.logger = logger
+        self.jog_mode_profile = jog_mode_profile
         
         self.x_motor_cfg: dict | None = None
         self.y_motor_cfg: dict | None = None
@@ -351,7 +426,8 @@ class XYZMotionController:
             ),
             cfg_callback=lambda motor: self._config_motor(motor, cfg),
             comm_port=comm_port,
-            logger=self.logger
+            logger=self.logger,
+            jog_mode_profile=self.jog_mode_profile
         )
         return motor_controller
     
@@ -363,7 +439,7 @@ class XYZMotionController:
         is only created when the `SPMProcess` is started. After its creation, 
         the process then calls this method to set its motor configuration.
         """
-        high_sensitivity = cfg.get("high_sensitivity", True)
+        high_sensitivity = cfg.get("high_sensitivity", False)
         resolution = cfg["microstepping"]["resolution"]
         full_steps_per_rev = cfg["microstepping"]["full_steps_per_rev"]
         run_current_pct = cfg["current"]["run_current_pct"]
@@ -430,19 +506,21 @@ class XYZMotionController:
         """
         for motor_ctrl in self.motor_ctrls:
             motor_ctrl.shutdown()
+
         for motor_ctrl in self.motor_ctrls:
             motor_ctrl.disable()
     
-    def get_status(self) -> MotionControlStatus:
+    def get_motion_status(self) -> MotionStatus:
         """
         Returns the current operating state of each individual motor and the 
-        global operating state of the motion control.
+        global operating state of the motion control in a `MotionStatus` object.
         """
         def get_motor_status(motor_ctrl: MotorController) -> MotorStatus:
             return MotorStatus(
                 ready=motor_ctrl.motor_ready,
-                busy=motor_ctrl.motor_busy,
-                travel_time=motor_ctrl.travel_time
+                motions_finished=motor_ctrl.motions_finished,
+                travel_time=motor_ctrl.travel_time,
+                jog_mode_active=motor_ctrl.jog_mode_active
             )
         
         kwargs = {}
@@ -455,8 +533,7 @@ class XYZMotionController:
                 kwargs["y"] = motor_status
             if motor_ctrl.motor_name == "Z-axis":
                 kwargs["z"] = motor_status
-        motion_control_status = MotionControlStatus(**kwargs)
-        return motion_control_status
+        return MotionStatus(**kwargs)
     
     def load_trajectory(self, filepath: str) -> int:
         """
@@ -469,12 +546,17 @@ class XYZMotionController:
         with open(filepath, "r") as f:
             self.trajectory = json.load(f)
         
-        # Assign the number of segments in the trajectory to each motor 
-        # controller.
+        # Assign the number of segments in the trajectory to each axis motor
+        # controller if this is needed.
         num_segments = len(self.trajectory)
-        for motor_ctrl in self.motor_ctrls:
-            motor_ctrl.num_segments = num_segments
-        
+        segment1 = self.trajectory[0]
+        if "x" in segment1.keys():
+            self.x_motor_ctrl.set_init_state_trajectory(num_segments)
+        if "y" in segment1.keys():
+            self.y_motor_ctrl.set_init_state_trajectory(num_segments)
+        if "z" in segment1.keys():
+            self.z_motor_ctrl.set_init_state_trajectory(num_segments)
+
         # Create a generator to iterate on command over the segments in the 
         # trajectory (see method `move()`)
         self.segments = ((i, s) for i, s in enumerate(self.trajectory))
@@ -490,35 +572,34 @@ class XYZMotionController:
                 return RotationDirection.CW
         return None
     
-    def _send_stepper_signals(self, segment: dict[str, Any]) -> None:
+    def _send_stepper_signals(self, segment: dict[str, tuple]) -> None:
         """
         Sends the step pulse signals (including the rotation direction) of a 
         single segment in the loaded trajectory to the motor controllers.
         """
-        if self.x_motor_ctrl is not None: 
-            self.x_motor_ctrl.send_stepper_signal(
+        if self.x_motor_ctrl is not None and "x" in segment.keys():
+            self.x_motor_ctrl.move(
                 step_pulses=segment["x"][0],
                 rdir=self._get_rotation_direction(segment["x"][1])
             )
 
-        if self.y_motor_ctrl is not None:
-            self.y_motor_ctrl.send_stepper_signal(
+        if self.y_motor_ctrl is not None and "y" in segment.keys():
+            self.y_motor_ctrl.move(
                 step_pulses=segment["y"][0],
                 rdir=self._get_rotation_direction(segment["y"][1])
             )
 
-        if self.z_motor_ctrl is not None:
-            self.z_motor_ctrl.send_stepper_signal(
+        if self.z_motor_ctrl is not None and "z" in segment.keys():
+            self.z_motor_ctrl.move(
                 step_pulses=segment["z"][0],
                 rdir=self._get_rotation_direction(segment["z"][1])
             )
     
     def move(self) -> int:
         """
-        Executes a move command.
-        Sends the signals for the next segment axis rotations in the trajectory 
-        to the motor controllers. Returns the sequence number of the segment in
-        the trajectory or -1 when the trajectory is finished.
+        Sends the step pulse signals for the next segment axis rotations in the
+        trajectory to the motor controllers. Returns the sequence number of the
+        segment in the trajectory or -1 when the trajectory is finished.
         """
         if self.trajectory:
             try:
@@ -531,100 +612,63 @@ class XYZMotionController:
         else:
             raise AttributeError("No trajectory has been loaded yet.")
 
-
-class XYZMotionPLC(AbstractPLC):
-    """
-    Extends class `AbstractPLC` by incorporating an `XYZMotionController`. The
-    motion controller is accessible through attribute `self.motion_controller`.
-    To read the current state of the motors controlled by the motion controller,
-    access attribute `self.motion_control_status`.
-    """
-    def __init__(
-        self, 
-        hmi_data: HMISharedData | None, 
-        logger: logging.Logger,
-        motor_config_filepath: str,
+    def start_jog_mode(
+        self,
+        axis: str,
+        rdir: RotationDirection = RotationDirection.CCW
     ) -> None:
         """
-        Instantiates the PLC application.
-        """
-        super().__init__(hmi_data=hmi_data, logger=logger)
-        self.motion_controller = XYZMotionController(self, motor_config_filepath, logger)
-        self.motion_control_status: MotionControlStatus | None = None
-        self._init_flag = True
-    
-    def _init_control(self) -> None:
-        if self._init_flag:
-            self._init_flag = False
-            self.motion_controller.enable()
-            self.init_control()
-    
-    @abstractmethod
-    def init_control(self) -> None:
-        """
-        This method is executed only once the moment the PLC program steps into 
-        its first scan cycle.
-        """
-        pass    
-    
-    @abstractmethod
-    def sequence_control(self) -> None:
-        """
-        Applies the transition logic to move from one step to another 
-        (or others in case of simultaneous tasks) in the PLC program sequence 
-        (SFC-approach).
-        """
-        pass
-    
-    @abstractmethod
-    def execute_actions(self) -> None:
-        """
-        Implements the actions connected to each step of the PLC sequence. 
-        Only executes the actions that are connected to the currently active 
-        step(s) in the PLC sequence.
-        """
-        pass
-    
-    def control_routine(self) -> None:
-        # Run any initialization tasks when the PLC is launched.
-        self._init_control()
-        
-        # Request the current operating state of the motors at the start 
-        # of the sequential control routine. The current operating state is
-        # accessible through attribute `self.motion_control_status`.
-        self.motion_control_status = self.motion_controller.get_status()
-        
-        # PLC program implementation.
-        self.sequence_control()
-        self.execute_actions()
-    
-    def exit_routine(self) -> None:
-        """Default exit routine which is called when the `exit()` method is 
-        called or when the operator presses <Ctrl-Z>.
-        
-        Override this method or use `super()` to extend it. However, be aware
-        that the motion controller must always be disabled.
-        """
-        self.logger.info("Exit. Shutting down...")
-        self.motion_controller.disable()
-        self.logger.info("Motion controller stopped.")
+        Turns jog mode on for the specified axis.
 
-    def emergency_routine(self):
-        """Default emergency routine which is called when an `EmergencyException`
-        is raised from the `control_routine()`.
-        
-        Override this method or use `super()` to extend it. However, be aware
-        that the motion controller must always be disabled.
-        """
-        self.logger.warning("Received emergency stop. Shutting down...")
-        self.exit_routine()
+        Jog mode can only be started when all motors are at rest and the
+        execution of a trajectory has been finished.
 
-    def crash_routine(self, exception):
-        """Default crash routine in case an unexpected error should occur.
-        
-        Override this method or use `super()` to extend it. However, be aware
-        that the motion controller must always be disabled.
+        Parameters
+        ----------
+        axis: str, {"x", "y", "z"}
+            Specifies the motion axis.
+        rdir:
+            Rotation direction in jog mode.
+
+        Returns
+        -------
+        None
         """
-        self.logger.error("PLC program crashed. Shutting down...")
-        self.exit_routine()
-        raise exception
+        motion = self.get_motion_status()
+        if motion.all_ready and motion.all_finished:
+            if axis == "x" and self.x_motor_ctrl is not None:
+                motor_ctrl = self.x_motor_ctrl
+            elif axis == "y" and self.y_motor_ctrl is not None:
+                motor_ctrl = self.y_motor_ctrl
+            elif axis == "z" and self.z_motor_ctrl is not None:
+                motor_ctrl = self.z_motor_ctrl
+            else:
+                raise ValueError(f"Axis {axis} is undefined.")
+            motor_ctrl.start_jog_mode(rdir)
+        else:
+            self.logger.warning("Jog mode cannot be started.")
+
+    def stop_jog_mode(self, axis: str) -> None:
+        """
+        Turns jog mode off.
+
+        Parameters
+        ----------
+        axis: str, {"x", "y", "z"}
+            Specifies the motion axis.
+
+        Returns
+        -------
+        None
+        """
+        motion_status = self.get_motion_status()
+        if motion_status.jog_mode_active:
+            if axis == "x" and self.x_motor_ctrl is not None:
+                motor_ctrl = self.x_motor_ctrl
+            elif axis == "y" and self.y_motor_ctrl is not None:
+                motor_ctrl = self.y_motor_ctrl
+            elif axis == "z" and self.z_motor_ctrl is not None:
+                motor_ctrl = self.z_motor_ctrl
+            else:
+                raise ValueError(f"Axis {axis} is undefined.")
+            motor_ctrl.stop_jog_mode()

@@ -178,8 +178,7 @@ class TMC2208StepperMotor(StepperMotor):
                 "vsense": high_sensitivity
             }
         )
-        self.logger.info("Enable through UART")
-    
+
     def disable(self) -> None:
         """
         Disables the stepper driver.

@@ -138,7 +138,7 @@ def get_constant_acceleration(
 
 if __name__ == '__main__':
     
-    from charts import LineChart
+    from pyberryplc.charts import LineChart
 
     def main():
         a0 = 0.5
