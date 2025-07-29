@@ -78,25 +78,19 @@ This class is then used in class `XYZMotionController` for controlling the TMC22
 three axes (X, Y, and/or Z) so that 1D-, 2D-, or 3D-trajectories can be executed. The configuration settings of the 
 stepper motors are taken here from a TOML file. An `XYZMotionController` receives a trajectory through a JSON file that 
 contains the step pulse signals and rotation directions of all segments in the trajectory. This JSON file can easily be 
-obtained from a `Trajectory` object created with the `motion` subpackage (see below). 
-Finally, module `controller.py` also contains the class `XYZMotionPLC`, which is derived from the abstract base class
-`AbstractPLC` residing in the `core` subpackage. The `XYZMotionPLC` class incorporates an `XYZMotionController` and is 
-intended to quickly setup any PLC application that needs motion control.
+obtained from a `PointToPointTrajectory` object created with the `motion` subpackage (see below). 
 
 ### `motion`
 
 **Provides tools for defining motion profiles and trajectories.**
 
-The main modules are `multi_axis.py` and `trajectory.py`.
+The main modules are `profile.py` and `trajectory.py`.
 
-`multi_axis.py` defines the abstract `MotionProfile` class and its concrete implementations, `TrapezoidalProfile` 
+`profile.py` defines the abstract `MotionProfile` class and its concrete implementations, `TrapezoidalProfile` 
 and `SCurvedProfile`, enabling you to specify motion profiles for stepper motors.
 
-`trajectory.py` contains everything needed to execute two- or three-dimensional trajectories with two or three synchronized stepper 
-motors (X, Y and Z axes) and minimized path deviations. The key class is `TrajectoryPlanner`, which takes a 
-series of $(x, y, z)$ points representing the start and end of each trajectory segment. The result is a `Trajectory` 
-object —a list of `Segment` objects, each containing motion profiles and rotation directions for the axes, allowing you 
-to verify profiles before execution.
+`trajectory.py` contains everything needed to execute two- or three-dimensional point-to-point trajectories with two or 
+three synchronized stepper motors (X, Y and Z axes).
 
 ![PyBerryPLC trajectories](media/trajectories.png)
 
