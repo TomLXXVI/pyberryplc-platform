@@ -312,6 +312,11 @@ class SPMCProcess(multiprocessing.Process):
                         "message": "jog mode turned off"
                     })
 
+            elif cmd == "set_jog_mode_profile_args":
+                args = msg.get("args")
+                if args is not None and self.jog_mode_profile is not None:
+                    self.jog_mode_profile = type(self.jog_mode_profile)(**args)
+
             elif cmd == "shutdown":
                 motor.disable()
                 break

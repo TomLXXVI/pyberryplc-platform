@@ -268,7 +268,7 @@ class MotorController:
     def set_init_state_trajectory(self, num_moves: int) -> None:
         """
         Sets the initial state of the controller when a series of consecutive
-        movements in a trajectory is to be performed.
+        movements in a trajectory is to be started.
         """
         self.num_moves = num_moves
         self.move_counter.reset()
@@ -276,6 +276,20 @@ class MotorController:
         # reset to False and will become True again when all motor movements
         # are completed (see method `_set_status()`).
         self._motions_finished.update(False)
+
+    def set_jog_mode_profile(self, mp: MotionProfile):
+        self.jog_mode_profile = mp
+        profile_args = {
+            "ds_tot": mp.ds_tot,
+            "a_max": mp.a_max,
+            "v_max": mp.v_max,
+            "v_i": mp.v_i,
+            "v_f": mp.v_f
+        }
+        self.comm_interface.send({
+            "cmd": "set_jog_mode_profile_args",
+            "args": profile_args
+        })
 
 
 @dataclass
@@ -535,33 +549,49 @@ class XYZMotionController:
                 kwargs["z"] = motor_status
         return MotionStatus(**kwargs)
     
-    def load_trajectory(self, filepath: str) -> int:
+    def load_trajectory(
+        self,
+        filepath: str | None,
+        trajectory: list | None = None
+    ) -> int:
         """
-        Loads a trajectory JSON file from the given filepath and returns the
-        number of segments (movements) in the trajectory. 
+        If `filepath` is not None, loads a trajectory JSON file from the given
+        filepath. If a trajectory is directly passed, set `file_path` to None,
+        and pass the trajectory through parameter `trajectory`.
 
-        A trajectory JSON file is created by calling method 
-        `save_stepper_signals()` on a `Trajectory` object.
+        Note: A trajectory JSON file can be created by calling method
+        `save_stepper_signals()` on a `PointToPointTrajectory` object.
+
+        Returns
+        -------
+        int :
+            The number of segments in the trajectory. If the trajectory is
+            invalid, -1 is returned.
         """
-        with open(filepath, "r") as f:
-            self.trajectory = json.load(f)
-        
-        # Assign the number of segments in the trajectory to each axis motor
-        # controller if this is needed.
-        num_segments = len(self.trajectory)
-        segment1 = self.trajectory[0]
-        if "x" in segment1.keys():
-            self.x_motor_ctrl.set_init_state_trajectory(num_segments)
-        if "y" in segment1.keys():
-            self.y_motor_ctrl.set_init_state_trajectory(num_segments)
-        if "z" in segment1.keys():
-            self.z_motor_ctrl.set_init_state_trajectory(num_segments)
+        if filepath is not None:
+            with open(filepath, "r") as f:
+                self.trajectory = json.load(f)
+        else:
+            self.trajectory = trajectory
 
-        # Create a generator to iterate on command over the segments in the 
-        # trajectory (see method `move()`)
-        self.segments = ((i, s) for i, s in enumerate(self.trajectory))
-        
-        return num_segments
+        if self.trajectory:
+            # Assign the number of segments in the trajectory to each axis motor
+            # controller if this is needed.
+            num_segments = len(self.trajectory)
+            segment1 = self.trajectory[0]
+            if "x" in segment1.keys():
+                self.x_motor_ctrl.set_init_state_trajectory(num_segments)
+            if "y" in segment1.keys():
+                self.y_motor_ctrl.set_init_state_trajectory(num_segments)
+            if "z" in segment1.keys():
+                self.z_motor_ctrl.set_init_state_trajectory(num_segments)
+
+            # Create a generator to iterate on command over the segments in the
+            # trajectory (see method `move()`)
+            self.segments = ((i, s) for i, s in enumerate(self.trajectory))
+
+            return num_segments
+        return -1
         
     @staticmethod
     def _get_rotation_direction(rdir: str) -> RotationDirection | None:
@@ -672,3 +702,7 @@ class XYZMotionController:
             else:
                 raise ValueError(f"Axis {axis} is undefined.")
             motor_ctrl.stop_jog_mode()
+
+    def set_jog_mode_profile(self, mp: MotionProfile):
+        for motor_ctrl in self.motor_ctrls:
+            motor_ctrl.set_jog_mode_profile(mp)

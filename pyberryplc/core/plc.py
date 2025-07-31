@@ -97,7 +97,7 @@ class AbstractPLC(ABC):
         # application: 
         self.hmi_input_register: dict[str, MemoryVariable] = {}
         self.hmi_output_register: dict[str, MemoryVariable] = {}
-        if hmi_data: self._setup_hmi_shared_data()
+        if hmi_data: self._setup_hmi_data()
         
         # To terminate program: press Ctrl-Z and method `_exit_handler` will be
         # called which terminates the PLC scanning loop.
@@ -424,28 +424,45 @@ class AbstractPLC(ABC):
         else:
             raise ConfigurationError(f"unknown PWM output `{label}`")
     
-    def _setup_hmi_shared_data(self) -> None:
+    def _setup_hmi_data(self) -> None:
         """If a `HMISharedData` object is passed to `AbstractPLC.__init__(), 
         creates separate HMI input and output registers.
         """
         self.hmi_input_register = {
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            name: MemoryVariable(
+                curr_state=init_value,
+                prev_state=init_value
+            )
             for name, init_value in self.hmi_data.buttons.items()
         }
         self.hmi_input_register.update({
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            name: MemoryVariable(
+                curr_state=init_value,
+                prev_state=init_value
+            )
             for name, init_value in self.hmi_data.switches.items()
         })
         self.hmi_input_register.update({
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
+            name: MemoryVariable(
+                curr_state=init_value,
+                prev_state=init_value,
+                single_bit=False
+            )
             for name, init_value in self.hmi_data.analog_inputs.items()
         })
         self.hmi_output_register = {
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value)
+            name: MemoryVariable(
+                curr_state=init_value,
+                prev_state=init_value
+            )
             for name, init_value in self.hmi_data.digital_outputs.items()
         }
         self.hmi_output_register.update({
-            name: MemoryVariable(curr_state=init_value, prev_state=init_value, single_bit=False)
+            name: MemoryVariable(
+                curr_state=init_value,
+                prev_state=init_value,
+                single_bit=False
+            )
             for name, init_value in self.hmi_data.analog_outputs.items()
         })
     
@@ -453,7 +470,7 @@ class AbstractPLC(ABC):
         """Reads all physical inputs (defined in the PLC application) and writes 
         their current states to the PLC input register.
         
-        If an HMI is connected to the PLC application (`hmi_shared_data` is not 
+        If an HMI is connected to the PLC application (`hmi_data` is not 
         `None`) also updates the memory variables in the HMI input register
         from the shared data object.
         
@@ -470,13 +487,13 @@ class AbstractPLC(ABC):
         if self.hmi_data: self._read_hmi_inputs()
     
     def _read_hmi_inputs(self) -> None:
-        """Reads HMI inputs from `self.hmi_shared_data` and updates the HMI input
+        """Reads HMI inputs from `self.hmi_data` and updates the HMI input
         register.
         """
         for name, value in self.hmi_data.buttons.items():
             self.hmi_input_register[name].update(value)
             # if an HMI button state has been read into the HMI register of the
-            # PLC always reset this state in `self.hmi_shared_data` (i.e. means that
+            # PLC always reset this state in `self.hmi_data` (i.e. means that
             # a button press in the HMI is valid for only one PLC scan cycle).
             self.hmi_data.buttons[name] = False
 
@@ -490,7 +507,7 @@ class AbstractPLC(ABC):
         """Writes all current states in the PLC output register to the 
         corresponding physical outputs.
         
-        If an HMI is connected to the PLC application (`hmi_shared_data` is not 
+        If an HMI is connected to the PLC application (`hmi_data` is not 
         `None`) writes the current states in the HMI output register to
         the shared data object.
         
@@ -508,7 +525,7 @@ class AbstractPLC(ABC):
     
     def _write_hmi_outputs(self) -> None:
         """Writes the state of the HMI outputs in the PLC HMI output register
-        to `self.hmi_shared_data`.
+        to `self.hmi_data`.
         """
         for name, mem_var in self.hmi_output_register.items():
             if mem_var.single_bit:

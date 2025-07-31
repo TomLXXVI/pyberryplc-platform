@@ -104,7 +104,7 @@ class AbstractHMI(ABC):
         title: str,
         app,
         ui,
-        shared_data: HMISharedData,
+        shared_data: HMISharedData | None,
         plc_app: Type[AbstractPLC] | None,
         logger: Logger,
         port: int = 8081,
@@ -114,17 +114,17 @@ class AbstractHMI(ABC):
 
         Parameters
         ----------
-        title : str
+        title :
             Name for the HMI app.
-        shared_data : HMISharedData
+        shared_data :
             The shared object for data exchange between PLC and HMI.
-        plc_app : Type[AbstractPLC]
-            PLC application class, i.e. the concrete class inherited from 
+        plc_app :
+            PLC application class, i.e. the concrete class inherited from
             `AbstractPLC`.
         logger : 
             Logger instance that will be attached to the PLC and HMI application
             instance.
-        port: int
+        port :
             Port the HMI server is listening to. Default port is 8081.
         """
         self.title = title
