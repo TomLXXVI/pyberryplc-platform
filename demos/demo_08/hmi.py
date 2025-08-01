@@ -1,6 +1,6 @@
 import io
 import csv
-from functools import partial
+import tomllib
 
 import plotly.graph_objects as go
 
@@ -161,11 +161,29 @@ class AutomaticPanel:
                 self._build_upload_widget()
                 # Trajectory plot
                 self._build_trajectory_plot()
+
+                with self.ui.column():
+                    self.ui.label("Maximum acceleration (°/s²)")
+                    alpha_max_slider = self.ui.slider(
+                        min=100.0, max=5000.0, step=100.0, value=1500.0,
+                    )
+                    self.ui.label().bind_text_from(alpha_max_slider, "value")
+
+                    self.ui.label("Maximum speed (°/s)")
+                    omega_max_slider = self.ui.slider(
+                        min=100.0, max=5000.0, step=100.0, value=1500.0,
+                    )
+                    self.ui.label().bind_text_from(omega_max_slider, "value")
+
                 self.ui.separator()
                 with self.ui.row():
                     self.ui.button(
                         "Verify Motion Profiles",
-                        on_click=partial(self.parent.profile_dialog.open, self.points)
+                        on_click=lambda: self.parent.profile_dialog.open(
+                            self.points,
+                            (alpha_max_slider.value, alpha_max_slider.value),
+                            (omega_max_slider.value, omega_max_slider.value)
+                        )
                     )
                     self.parent.send_button = self.ui.button(
                         "Send to PLC",
@@ -246,9 +264,30 @@ class MotionProfileDialog:
         self.acc = None
         self.points = []
         self.motion_profile_plotter = MotionProfilePlotlyPlotter(self.ui)
+        self.motor_config: dict = {}
 
+        self._get_motor_configurations()
         self._create_overlay()
         self._create_dialog()
+
+    def _get_motor_configurations(self):
+        data = tomllib.load(open("motor_config.toml", "rb"))
+        x_motor_data = data["x_motor"]
+        y_motor_data = data["y_motor"]
+        x_full_steps_per_rev = x_motor_data["microstepping"]["full_steps_per_rev"]
+        y_full_steps_per_rev = y_motor_data["microstepping"]["full_steps_per_rev"]
+        x_microstep_factor = int(x_motor_data["microstepping"]["resolution"].split("/")[-1])
+        y_microstep_factor = int(y_motor_data["microstepping"]["resolution"].split("/")[-1])
+        x_pitch = x_motor_data["pitch"]
+        y_pitch = y_motor_data["pitch"]
+        x_rdir_ref = RotationDirection.CW if x_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
+        y_rdir_ref = RotationDirection.CW if y_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
+        self.motor_config = {
+            "full_steps_per_rev": (x_full_steps_per_rev, y_full_steps_per_rev),
+            "microstep_factor": (x_microstep_factor, y_microstep_factor),
+            "pitch": (x_pitch, y_pitch),
+            "rdir_ref": (x_rdir_ref, y_rdir_ref),
+        }
 
     def _create_dialog(self) -> None:
         self._dialog = self.ui.dialog()
@@ -307,12 +346,17 @@ class MotionProfileDialog:
         self.motion_profile_plotter.set_figure_layout(y_label)
         self.motion_profile_plot.update()
 
-    async def open(self, points: list[tuple[float, float]]):
+    async def open(
+        self,
+        points: list[tuple[float, float]],
+        alpha_max: tuple[float, float],
+        omega_max: tuple[float, float]
+    ):
         # first show the overlay with spinner during calculation of motion
         # profiles
         self._overlay.open()
         try:
-            await self._compute_trajectory(points)
+            await self._compute_trajectory(points, alpha_max, omega_max)
         except Exception as ex:
             self.ui.notify(
                 f"Failed to generate motion profiles: {ex}",
@@ -325,22 +369,29 @@ class MotionProfileDialog:
         self._show_motion_profile()
         self._dialog.open()
 
-    async def _compute_trajectory(self, points: list[tuple[float, float]]):
+    async def _compute_trajectory(
+        self,
+        points: list[tuple[float, float]],
+        alpha_max: tuple[float, float],
+        omega_max: tuple[float, float]
+    ):
         points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
+
         self.parent.trajectory = PointToPointTrajectory(
             n_axes=2,
             profile_type=SCurvedProfile,
-            pitch=250.0,
-            rdir_ref=(RotationDirection.CCW, RotationDirection.CCW),
-            alpha_max=1500.0,
-            omega_max=1500.0,
-            full_steps_per_rev=200,
-            microstep_factor=2
+            pitch=self.motor_config["pitch"],
+            rdir_ref=self.motor_config["rdir_ref"],
+            alpha_max=alpha_max,
+            omega_max=omega_max,
+            full_steps_per_rev=self.motor_config["full_steps_per_rev"],
+            microstep_factor=self.motor_config["microstep_factor"]
         )
         self.parent.trajectory(*points)
         self.pos = self.parent.trajectory.position_profiles
         self.vel = self.parent.trajectory.velocity_profiles
         self.acc = self.parent.trajectory.acceleration_profiles
+
         self.parent.set_button_state(self.parent.send_button, enabled=True)
 
 
