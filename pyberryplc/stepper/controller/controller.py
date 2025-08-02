@@ -32,7 +32,7 @@ class MotorController:
         cfg_callback: Callable[[TStepperMotor], None] | None = None,
         comm_port: str = "",
         logger: logging.Logger | None = None,
-        jog_mode_profile: MotionProfile | None = None
+        jog_mode_profile: MotionProfile | None = None,
     ) -> None:
         """
         Creates a `SPMotorController` instance.
@@ -239,7 +239,6 @@ class MotorController:
         # `_set_status()`) and `self.motor_ready` is then set to True again.
         if self._motor_ready.state:
             self._motor_ready.update(False)
-
             self.comm_interface.send({
                 "cmd": "start_motion",
                 "delays": step_pulses,
@@ -441,7 +440,7 @@ class XYZMotionController:
             cfg_callback=lambda motor: self._config_motor(motor, cfg),
             comm_port=comm_port,
             logger=self.logger,
-            jog_mode_profile=self.jog_mode_profile
+            jog_mode_profile=self.jog_mode_profile,
         )
         return motor_controller
     
@@ -592,13 +591,13 @@ class XYZMotionController:
 
             return num_segments
         return -1
-        
+
     @staticmethod
-    def _get_rotation_direction(rdir: str) -> RotationDirection | None:
+    def get_rotation_direction(rdir: str) -> RotationDirection | None:
         match rdir:
-            case "counterclockwise":
+            case "counterclockwise" | "ccw":
                 return RotationDirection.CCW
-            case "clockwise":
+            case "clockwise" | "cw":
                 return RotationDirection.CW
         return None
     
@@ -610,19 +609,19 @@ class XYZMotionController:
         if self.x_motor_ctrl is not None and "x" in segment.keys():
             self.x_motor_ctrl.move(
                 step_pulses=segment["x"][0],
-                rdir=self._get_rotation_direction(segment["x"][1])
+                rdir=self.get_rotation_direction(segment["x"][1])
             )
 
         if self.y_motor_ctrl is not None and "y" in segment.keys():
             self.y_motor_ctrl.move(
                 step_pulses=segment["y"][0],
-                rdir=self._get_rotation_direction(segment["y"][1])
+                rdir=self.get_rotation_direction(segment["y"][1])
             )
 
         if self.z_motor_ctrl is not None and "z" in segment.keys():
             self.z_motor_ctrl.move(
                 step_pulses=segment["z"][0],
-                rdir=self._get_rotation_direction(segment["z"][1])
+                rdir=self.get_rotation_direction(segment["z"][1])
             )
     
     def move(self) -> int:

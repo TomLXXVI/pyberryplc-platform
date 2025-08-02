@@ -155,7 +155,7 @@ class AutomaticPanel:
         self = cls(parent)
 
         with self.ui.tab_panel("Automatic Mode"):
-            with self.ui.column().classes("border rounded p-4 w-full"):
+            with self.ui.column().classes("border rounded p-4"):
                 self.ui.label("Automatic Mode").classes("text-xl mb-2")
                 # Trajectory CSV file upload widget
                 self._build_upload_widget()
@@ -406,7 +406,7 @@ class JogModePanel:
         self = cls(parent)
 
         with self.ui.tab_panel("Jog Mode"):
-            with self.ui.column().classes("border rounded p-4 w-full"):
+            with self.ui.column().classes("border rounded p-4"):
                 self.ui.label("Jog Mode").classes("text-xl mb-2")
 
                 self.ui.label().bind_text_from(
