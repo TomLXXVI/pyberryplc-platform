@@ -138,12 +138,12 @@ class MotorController:
             # A motion is completed:
             self.move_counter.count_up()
             # Report its travel time through the logger:
-            travel_time = msg.get("travel_time", float("nan"))
+            travel_time = msg.get("travel_time", 0.0)
             self._travel_time.update(travel_time)
             self.logger.info(
                 f"[{self.motor_name}] "
                 f"movement {self.move_counter.value}: "
-                f"travel time {self.motor_name} = "
+                f"travel time = "
                 f"{self._travel_time.state:.3f} s"
             )
             if self.move_counter.value < self.num_moves:
@@ -174,8 +174,10 @@ class MotorController:
 
         elif status == "jog_stopped":
             self._jog_mode_active.update(False)
+            travel_time = msg.get("travel_time", 0.0)
+            self._travel_time.update(travel_time)
             self.logger.info(
-                f"[{self.motor_name}] {msg.get('message', '')}"
+                f"[{self.motor_name}] {msg.get('message', '')} ({travel_time:.3f} s)"
             )
 
         elif status == "error":

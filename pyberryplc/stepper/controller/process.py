@@ -155,6 +155,8 @@ class SPMCProcess(multiprocessing.Process):
         instantiation (e.g., set microstepping, current limits).
     motor_name : str, optional
         Process identifier for logging and debugging purposes.
+    jog_mode_profile : MotionProfile, optional
+        Motion profile for acceleration/deceleration while in jog mode.
     
     Communication messages between the external process and the `SPMCProcess` 
     are dictionaries. The external process sends commands to the `SPMCProcess`
@@ -202,7 +204,7 @@ class SPMCProcess(multiprocessing.Process):
 
     3.  In response to command "stop_jog":
         ```
-        {"status": "jog_stopped", "name": <str>, "message": <str>}
+        {"status": "jog_stopped", "name": <str>, "message": <str>, "travel_time": <float>}
         ```
 
     4.  If an exception is raised when instantiating or configuring the
@@ -309,7 +311,8 @@ class SPMCProcess(multiprocessing.Process):
                     self.conn.send({
                         "status": "jog_stopped",
                         "name": self.motor_name,
-                        "message": "jog mode turned off"
+                        "message": "jog mode turned off",
+                        "travel_time": motor.rotator.travel_time
                     })
 
             elif cmd == "set_jog_mode_profile_args":

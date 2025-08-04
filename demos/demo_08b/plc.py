@@ -275,6 +275,7 @@ class MotionPLC(AbstractPLC):
         self.y_motor_ready = self.hmi_output_register["y_motor_ready"]
         self.x_travel_time = self.hmi_output_register["x_travel_time"]
         self.y_travel_time = self.hmi_output_register["y_travel_time"]
+        self.z_travel_time = self.hmi_output_register["z_travel_time"]
 
     def _init_control(self):
         if self.init_flag:

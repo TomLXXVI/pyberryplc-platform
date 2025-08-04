@@ -33,8 +33,9 @@ hmi_data = HMISharedData(
         "y_motor_ready": False,
     },
     analog_outputs={
-        "x_travel_time": float("nan"),
-        "y_travel_time": float("nan"),
+        "x_travel_time": 0.0,
+        "y_travel_time": 0.0,
+        "z_travel_time": 0.0
     },
     data={
         "mode": "",
@@ -462,7 +463,6 @@ class JogModePanel:
 
     def _set_jog_speed(self, value: str):
         self.parent.hmi_data.data["jog_speed"] = value.lower()
-        # self.ui.notify(f"Jog speed set to {value}")
 
 
 class CNCHMI(AbstractHMI):
@@ -506,9 +506,11 @@ class CNCHMI(AbstractHMI):
         selected_tab = event_args.value
         mode = "auto" if selected_tab == "Automatic Mode" else "jog"
         self.hmi_data.data["mode"] = mode
-        # self.ui.notify(f"Mode switched to {mode.capitalize()}")
 
     def update_status(self):
         plc_state = self.hmi_data.data["plc_state"]
         mode = self.hmi_data.data["mode"]
-        self.status_html.set_content(f"<b>{mode.upper()} | {plc_state.upper()}</b>")
+
+        status_msg = f"<b>{mode.upper()} | {plc_state.upper()}</b>"
+
+        self.status_html.set_content(status_msg)

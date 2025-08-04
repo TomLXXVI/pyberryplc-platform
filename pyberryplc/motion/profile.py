@@ -1,370 +1,263 @@
-import warnings
 from typing import Callable
 from abc import ABC, abstractmethod
-from enum import StrEnum
 
 import numpy as np
-from scipy.optimize import root_scalar, minimize_scalar
+from scipy.integrate import cumulative_trapezoid
+from scipy.optimize import root_scalar
 from scipy.interpolate import interp1d
 
 from pyberryplc.charts import LineChart
 
-from .elementary import cubic as cj, parabolic as ca
-
 
 class MotionProfile(ABC):
-    
+    dt_acc_min: float = 0.1
+
     def __init__(
         self,
         ds_tot: float,
         a_max: float,
         v_max: float,
-        v_i: float | None = None,
-        v_f: float | None = None,
+        v_i: float | None,
+        v_f: float | None,
         s_i: float = 0.0,
         dt_tot: float | None = None
     ) -> None:
+        self.ds_tot = ds_tot
+        self.a_max = a_max
+        self.v_max = v_max
+        self.v_i = v_i
+        self.v_f = v_f
+        self.s_i = s_i
+        self.dt_tot = dt_tot
+
+        self.v_top = 0.0
+        self.dv_i = 0.0
+        self.dv_f = 0.0
+        self.a_top_i = 0.0
+        self.a_top_f = 0.0
+        self.dt_i = 0.0
+        self.dt_f = 0.0
+        self.ds_i = 0.0
+        self.ds_f = 0.0
+        self.ds_cov = 0.0
+        self.dt_cov = 0.0
+
+        self._calc_motion_profile()
+
+    @abstractmethod
+    def get_dv_min(self) -> float:
         """
-        Creates a `MotionProfile` object.
+        Returns the smallest achievable velocity change with acceleration
+        `self.a_max` where the acceleration time equals the minimum allowable
+        acceleration time `self.dt_acc_min`.
+        """
+        ...
+
+    @ abstractmethod
+    def _calc_a_top(self, dv: float) -> tuple[float, float]:
+        """
+        Calculates the top acceleration of the motion and the accleration time.
 
         Parameters
         ----------
-        ds_tot:
-            Total travel distance.
-        a_max:
-            (Maximum) acceleration (of the motor). This value remains unaltered
-            in the calculation of the motion profile (i.e. `self.a_top` is
-            always equal to `a_m`).
-        v_max:
-            (Maximum) speed limit (of the motor). `v_m` needs to be
-            distinguished from the top velocity `self.v_top` of the motion
-            profile. `v_m` poses a maximum limit when calculating `self.v_top`.
-        v_i: 
-            Start velocity of the movement, if known.
-        v_f: optional
-            End velocity of the movement, if known.
-        s_i:
-            Initial position of the axis or motor shaft.
-        dt_tot: optional
-            Total travel time. When total travel time is specified, a motion
-            profile is calculated so that total travel distance `ds_tot` is 
-            covered in `dt_tot` (seconds).
+        dv :
+            Required velocity change.
 
-        Units can be chosen freely, but must be consistent. Usually time is 
-        chosen to be expressed in seconds. The units of position (displacement),
-        velocity, and acceleration have units of length in common. For example,
-        if time is in seconds and position is in units of mm, then velocity must
-        be in mm/s, and acceleration in mm/s².
-
-        A motion profile can be calculated for two use cases:
-        (1) Travel distance `ds_tot` is known, but travel time `dt_tot` is not
-            (`dt_tot` is `None`).
-            The top velocity `self.v_top` is calculated so that the total travel
-            distance `ds_tot` is accomplished in the shortest possible travel
-            time `dt_tot`, taking into account the maximum velocity `v_m`, the
-            (maximum) acceleration `a_m`, and the initial and final boundary
-            velocities `v_i` and `v_f`.
-        (2) Travel distance `ds_tot` and travel time `dt_tot` are both known.
-            The travel time `dt_tot` adds an extra constraint to the calculation
-            of `self.v_top`.
-
-        The top acceleration `self.a_top` used in the calculations is always
-        equal to the (maximum) acceleration `a_m`.
-
-        If the initial boundary velocity `v_i` is undetermined (`None`), there
-        is no initial acceleration phase (no initial velocity change) and the
-        initial velocity will be equal to the calculated top velocity `v_top`.
-        The same also applies to the final boundary velocity `v_f`.
-
-        If neither the initial, nor the final boundary velocity is determined
-        (`v_i` and `v_f` are both `None`), the motion profile only has a
-        constant-velocity phase where the velocity is taken to be equal to the
-        value of `v_m`.
-        """
-        # Given by the user:
-        self.v_max = v_max
-        self.a_max = self.a_top = a_max
-        self.ds_tot = ds_tot
-        self.s_i = s_i
-        self.v_i = v_i
-        self.v_f = v_f
-        self.dt_tot = dt_tot
-
-        # To be calculated:
-        self.v_top: float = 0.0
-        self.dt_i: float = 0.0
-        self.dt_f: float = 0.0
-        self.dv_i: float = 0.0
-        self.dv_f: float = 0.0
-        self.ds_i: float = 0.0
-        self.ds_f: float = 0.0
-        self.ds_cov: float = 0.0
-        self.dt_cov: float = 0.0
-
-        self._calculate_motion_profile()
-
-    def _calculate_motion_profile(self) -> None:
-        if self.ds_tot == 0.0 and self.dt_tot is not None:
-            self.dt_cov = self.dt_tot
-            return
-
-        if self.ds_tot > 0.0:
-            if self.dt_tot is None:
-                # Case 1: without time constraint.
-                self.v_top = self._calc_v_top_without_time_constraint()
-            else:
-                # Case 2: with time constraint.
-                self.v_top = self._calc_v_top_with_time_constraint(self.dt_tot)
-
-            self.dv_i = self._calc_dv_i(self.v_top)
-            self.dt_i = self._calc_dt_acc(self.dv_i, self.a_top)
-            v_i = self.v_top if self.v_i is None else self.v_i
-            self.ds_i = self._calc_ds_i(v_i, self.a_top, self.dv_i, self.dt_i)
-            self.dv_f = self._calc_dv_f(self.v_top)
-            self.dt_f = self._calc_dt_acc(self.dv_f, self.a_top)
-            self.ds_f = self._calc_ds_f(self.v_top, self.a_top, self.dv_f, self.dt_f)
-            self.dt_cov = self._calc_dt_cov(self.v_top, self.a_top)
-            self.ds_cov = self._calc_ds_cov(self.v_top, self.a_top)
-            self.dt_tot = self._calc_dt_tot(self.v_top, self.a_top)
-
-    def _calc_dv_i(self, v_top: float) -> float:
-        """
-        Velocity change in initial acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        return v_top - self.v_i if self.v_i is not None else 0.0
-
-    def _calc_dv_f(self, v_top: float) -> float:
-        """
-        Velocity change in final acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        return self.v_f - v_top if self.v_f is not None else 0.0
-
-    @staticmethod
-    @abstractmethod
-    def _calc_dt_acc(dv: float, a_top: float) -> float:
-        """
-        Acceleration time (time duration of the initial/final acceleration phase).
-        """
-        ...
-    
-    @abstractmethod
-    def _calc_ds_i(
-        self,
-        v_i: float,
-        a_top: float,
-        dv_i: float,
-        dt_i: float
-    ) -> float:
-        """
-        Displacement during initial acceleration phase.
-        """
-        ...
-    
-    @abstractmethod
-    def _calc_ds_f(
-        self,
-        v_top: float,
-        a_top: float,
-        dv_f: float,
-        dt_f: float
-    ) -> float:
-        """
-        Displacement during final acceleration phase.
-        """
-        ...
-
-    def _calc_ds_cov(self, v_top: float, a_top: float) -> float:
-        """
-        Displacement during constant-velocity phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        dv_i = self._calc_dv_i(v_top)
-        dt_i = self._calc_dt_acc(dv_i, a_top)
-
-        if self.v_i is None:
-            v_i = v_top
-        else:
-            v_i = self.v_i
-        ds_i = self._calc_ds_i(v_i, a_top, dv_i, dt_i)
-
-        dv_f = self._calc_dv_f(v_top)
-        dt_f = self._calc_dt_acc(dv_f, a_top)
-        ds_f = self._calc_ds_f(v_top, a_top, dv_f, dt_f)
-        return self.ds_tot - (ds_i + ds_f)
-
-    def _calc_dt_cov(self, v_top: float, a_top: float) -> float:
-        """
-        Time duration of constant-velocity phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        ds_cov = self._calc_ds_cov(v_top, a_top)
-        return ds_cov / v_top
-
-    def _calc_dt_tot(self, v_top: float, a_top: float) -> float:
-        """
-        Total time duration of the movement (travel time).
-        """
-        dv_i = self._calc_dv_i(v_top)
-        dt_i = self._calc_dt_acc(dv_i, a_top)
-        dv_f = self._calc_dv_f(v_top)
-        dt_f = self._calc_dt_acc(dv_f, a_top)
-        dt_cov = self._calc_dt_cov(v_top, a_top)
-        return dt_i + dt_f + dt_cov
-
-    def _calc_v_top_without_time_constraint(self) -> float:
-        """
-        Calculates `v_top` so that `ds_cov` = 0 (i.e. without constant-velocity 
-        phase).
-        """
-        def _search_top_velocity() -> float:
-
-            def fn(v_top: float) -> float:
-                ds_cov = self._calc_ds_cov(v_top, self.a_top)
-                return ds_cov
-
-            try:
-                sol = root_scalar(fn, bracket=(1.e-12, self.v_max))
-                return sol.root
-            except ValueError:
-                raise ValueError("Could not find a suitable top velocity.")
-
-        if self.ds_tot == 0.0:
-            return 0.0
-        v_top_i = self.v_max
-        if self.v_f and self.v_i is not None:
-            dv = self.v_f - self.v_i
-            if dv > 0.0:
-                v_top_i = self.v_f
-            if dv < 0.0:
-                v_top_i = self.v_i
-        ds_cov = self._calc_ds_cov(v_top_i, self.a_top)
-        if ds_cov < 0.0:
-            v_top = _search_top_velocity()
-            return v_top
-        return v_top_i
-
-    def limit_dt_cov(self, dt_tot: float) -> float:
-        # Find `v_top` for which `dt_cov` = 0.
-        def _f(v_top):
-            dv_i = self._calc_dv_i(v_top)
-            dv_f = self._calc_dv_f(v_top)
-            dt_i = self._calc_dt_acc(dv_i, self.a_top)
-            dt_f = self._calc_dt_acc(dv_f, self.a_top)
-            dt_cov = dt_tot - (dt_i + dt_f)
-            return dt_cov
-
-        try:
-            sol = root_scalar(_f, bracket=(1.0, self.v_max))
-            return sol.root
-        except ValueError:
-            warnings.warn(
-                "`v_top` for which `dt_cov` = 0 cannot be determined.",
-                category=UserWarning
-            )
-            return self.v_max
-
-    def limit_ds_cov(self) -> float:
-        # Find `v_top` for which `ds_cov` = 0.
-        def _f(v_top):
-            dv_i = self._calc_dv_i(v_top)
-            dv_f = self._calc_dv_f(v_top)
-            dt_i = self._calc_dt_acc(dv_i, self.a_max)
-            dt_f = self._calc_dt_acc(dv_f, self.a_max)
-            v_i = v_top if self.v_i is None else self.v_i
-            ds_i = self._calc_ds_i(v_i, self.a_max, dv_i, dt_i)
-            ds_f = self._calc_ds_f(v_top, self.a_max, dv_f, dt_f)
-            ds_cov = self.ds_tot - (ds_i + ds_f)
-            return ds_cov
-
-        try:
-            sol = root_scalar(_f, bracket=(1.e-12, self.v_max))
-            return sol.root
-        except ValueError:
-            warnings.warn(
-                "`v_top` for which `ds_cov` = 0 cannot be determined.",
-                category=UserWarning
-            )
-            return self.v_max
-
-    def _calc_v_top_with_time_constraint(self, dt_tot: float) -> float:
-        """
-        Calculates `v_top` so that `ds_tot` is finished after `dt_tot` s when 
-        acceleration is `self.a_top`.
-        """
-        def objective(v_top: float) -> float:
-            try:
-                dv_i = self._calc_dv_i(v_top)
-                dv_f = self._calc_dv_f(v_top)
-
-                dt_i = self._calc_dt_acc(dv_i, self.a_top)
-                dt_f = self._calc_dt_acc(dv_f, self.a_top)
-                dt_cov = dt_tot - (dt_i + dt_f)
-                if dt_cov < 0.0:
-                    raise ValueError
-                v_i = v_top if self.v_i is None else self.v_i
-                ds_i = self._calc_ds_i(v_i, self.a_top, dv_i, dt_i)
-                ds_f = self._calc_ds_f(v_top, self.a_top, dv_f, dt_f)
-                ds_cov1 = self.ds_tot - (ds_i + ds_f)
-                if ds_cov1 < 0.0:
-                    raise ValueError
-                # constant-velocity travel distance must also satisfy:
-                ds_cov2 = v_top * dt_cov
-                dev = ds_cov2 - ds_cov1
-                return dev ** 2
-            except ValueError:
-                return 1e10
-
-        # noinspection PyTypeChecker
-        res = minimize_scalar(
-            objective, 
-            bounds=(1.e-12, self.v_max),
-            method='bounded'
-        )
-        if res.success and abs(res.fun) <= 1e-6:
-            return res.x
-        raise ValueError("Could not find a suitable top velocity.")
-        
-    @abstractmethod
-    def position(
-        self, 
-        t_arr: np.ndarray, 
-        s0: float,
-        v0: float,
-        dv: float
-    ) -> float | np.ndarray:
-        """
-        Returns position(s) at given time moment(s) during initial/final 
-        acceleration phase.
-        """
-        ...
-
-    @abstractmethod
-    def velocity(
-        self,
-        t_arr: np.ndarray,
-        v0: float,
-        dv: float
-    ) -> np.ndarray:
-        """
-        Returns velocities(s) at given time moment(s) during initial/final 
-        acceleration phase.
+        Returns
+        -------
+        a_top :
+            In case the acceleration time that follows from `dv` and `self.a_max`
+            is smaller than the minimum permitted acceleration time
+            `self.dt_acc_min`, the top acceleration `a_top` of the motion is
+            calculated so that acceleration time would equal the minimum
+            permitted acceleration time (`a_top` < `a_max`). Otherwise, `a_top`
+            is kept equal to `self.a_max`.
+        dt_acc :
+            Resulting acceleration time.
         """
         ...
 
     @abstractmethod
     def acceleration(
-        self, 
-        t_arr: np.ndarray,
-        dv: float
-    ) -> np.ndarray:
+        self,
+        dv: float,
+        t0: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Returns accelerations(s) at given time moment(s) during initial/final 
-        acceleration phase.
+        Calculates the acceleration values at given time moments during
+        acceleration of the motion.
+
+        Parameters
+        ----------
+        dv :
+            Required velocity change.
+        t0:
+            Initial time moment of the acceleration.
+
+        Returns
+        -------
+        t_arr :
+            Numpy array with the time values during acceleration of the motion.
+        a_arr:
+            Numpy array with the corresponding values of the acceleration.
         """
         ...
-    
+
+    def velocity_acc(
+        self,
+        dv: float,
+        t0: float = 0.0,
+        v0: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculates the velocity values at given time moments during
+        acceleration of the motion.
+
+        Parameters
+        ----------
+        dv :
+            Required velocity change.
+        t0 :
+            Initial time moment.
+        v0 :
+            Initial velocity.
+
+        Returns
+        -------
+        t_arr :
+            Numpy array with the time values during acceleration of the motion.
+        v_arr:
+            Numpy array with the corresponding values of the velocity.
+        """
+        t_arr, a_arr = self.acceleration(dv, t0)
+        v_arr = cumulative_trapezoid(a_arr, t_arr, initial=0)
+        v_arr += v0
+        return t_arr, v_arr
+
+    def position_acc(
+        self,
+        dv: float,
+        t0: float = 0.0,
+        s0: float = 0.0,
+        v0: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Calculates the position values at given time moments during
+        acceleration of the motion.
+
+        Parameters
+        ----------
+        dv :
+            Required velocity change.
+        t0 :
+            Initial time moment.
+        s0 :
+            Initial position.
+        v0 :
+            Initial velocity.
+
+        Returns
+        -------
+        t_arr :
+            Numpy array with the time values during acceleration of the motion.
+        s_arr:
+            Numpy array with the corresponding values of the position.
+        """
+        t_arr, v_arr = self.velocity_acc(dv, t0, v0)
+        s_arr = cumulative_trapezoid(v_arr, t_arr, initial=0)
+        s_arr += s0
+        return t_arr, s_arr
+
+    def _calc_ds(self, dv: float):
+        """
+        Calculates the distance traveled during acceleration of the motion.
+
+        Parameters
+        ----------
+        dv :
+            Required velocity change.
+
+        Returns
+        -------
+        ds :
+            Distance traveled during acceleration of the motion.
+        """
+        _, s_arr = self.position_acc(dv)
+        ds = s_arr[-1] - s_arr[0]
+        return ds
+
+    def _calc_dv_i(self, v_top: float) -> float:
+        dv = v_top - self.v_i if self.v_i is not None else 0.0  # assumes self.v_i = v_top
+        return dv
+
+    def _calc_dv_f(self, v_top: float) -> float:
+        dv = self.v_f - v_top if self.v_f is not None else 0.0  # assumes self.v_f = v_top
+        return dv
+
+    def _determine_v_top_without_time_constraint(self) -> float:
+
+        def fn(v_top: float) -> float:
+            dv_i = self._calc_dv_i(v_top)
+            dv_f = self._calc_dv_f(v_top)
+            ds_i = self._calc_ds(abs(dv_i))
+            ds_f = self._calc_ds(abs(dv_f))
+            ds_cov = self.ds_tot - (ds_i + ds_f)
+            return ds_cov
+
+        ds_cov = fn(self.v_max)
+        if ds_cov > 0.0:
+            return self.v_max
+
+        try:
+            sol = root_scalar(fn, bracket=(0.0, self.v_max))
+            return sol.root
+        except ValueError:
+            raise ValueError("Top velocity cannot be determined.")
+
+    def _determine_v_top_with_time_constraint(self) -> float:
+
+        def fn(v_top: float) -> float:
+            dv_i = self._calc_dv_i(v_top)
+            dv_f = self._calc_dv_f(v_top)
+            _, dt_i = self._calc_a_top(abs(dv_i))
+            _, dt_f = self._calc_a_top(abs(dv_f))
+            ds_i = self._calc_ds(abs(dv_i))
+            ds_f = self._calc_ds(abs(dv_f))
+            ds_cov1 = self.ds_tot - (ds_i + ds_f)
+            dt_cov = self.dt_tot - (dt_i + dt_f)
+            ds_cov2 = v_top * dt_cov
+            dev = ds_cov2 - ds_cov1
+            return dev
+
+        try:
+            sol = root_scalar(fn, bracket=(0.0, self.v_max))
+            return sol.root
+        except ValueError:
+            raise ValueError("Top velocity cannot be determined.")
+
+    def _calc_motion_profile(self) -> None:
+        if self.ds_tot == 0.0 and self.dt_tot is not None:
+            self.dt_cov = self.dt_tot
+            return
+
+        if self.ds_tot > 0.0 and self.dt_tot is None:
+            self.v_top = self._determine_v_top_without_time_constraint()
+        elif self.ds_tot > 0.0 and self.dt_tot is not None and self.dt_tot > 0.0:
+            self.v_top = self._determine_v_top_without_time_constraint()
+        else:
+            raise ValueError("Motion profile cannot be determined.")
+
+        self.dv_i = self._calc_dv_i(self.v_top)
+        self.dv_f = self._calc_dv_f(self.v_top)
+        self.a_top_i, self.dt_i = self._calc_a_top(abs(self.dv_i))
+        self.a_top_f, self.dt_f = self._calc_a_top(abs(self.dv_f))
+        self.ds_i = self._calc_ds(abs(self.dv_i))
+        self.ds_f = self._calc_ds(abs(self.dv_f))
+        self.ds_cov = self.ds_tot - (self.ds_i + self.ds_f)
+        if self.ds_cov > 0.0:
+            self.dt_cov = self.ds_cov / self.v_top
+        self.dt_tot = self.dt_i + self.dt_cov + self.dt_f
+
     def velocity_profile(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculates the velocity profile of the movement.
@@ -377,30 +270,27 @@ class MotionProfile(ABC):
             Numpy array with the corresponding values on the velocity-axis.
         """
         # initial acceleration phase
-        t0, v0 = 0.0, self.v_i if self.v_i is not None else self.v_top
-        t1 = t0 + self.dt_i
+        t0 = 0.0
+        v0 = self.v_i if self.v_i is not None else self.v_top
         if self.dt_i > 0.0:
-            t1_arr = np.linspace(t0, t1, 100)
-            v1_arr = self.velocity(t1_arr, v0, self.dv_i)
+            t1_arr, v1_arr = self.velocity_acc(self.dv_i, v0=v0)
         else:
             t1_arr, v1_arr = np.array([t0]), np.array([v0])
 
         # constant-velocity phase
-        t1, v1 = float(t1_arr[-1]), float(v1_arr[-1])
-        t2 = t1 + self.dt_cov
-        if t2 > t1:
+        t1 = float(t1_arr[-1])
+        v1 = float(v1_arr[-1])
+        if self.dt_cov > 0.0:
+            t2 = t1 + self.dt_cov
             t2_arr = np.linspace(t1, t2, 100)
             v2_arr = np.full_like(t2_arr, self.v_top)
-            t2, v2 = float(t2_arr[-1]), float(v2_arr[-1])
         else:
             t2_arr, v2_arr = None, None
-            t2, v2 = float(t1_arr[-1]), float(v1_arr[-1])
+            t2, v2 = t1, v1
 
         # final acceleration phase
         if self.dt_f > 0:
-            t3 = t2 + self.dt_f
-            t3_arr = np.linspace(t2, t3, 100)
-            v3_arr = self.velocity(t3_arr, self.v_top, self.dv_f)
+            t3_arr, v3_arr = self.velocity_acc(self.dv_f, t0=t2, v0=self.v_top)
         else:
             t3_arr, v3_arr = None, None
 
@@ -431,30 +321,27 @@ class MotionProfile(ABC):
             Numpy array with the corresponding values on the position-axis.
         """
         # initial acceleration phase
-        t0, v0, s0 = 0.0, self.v_i if self.v_i is not None else self.v_top, self.s_i
-        t1 = t0 + self.dt_i
+        s0 = self.s_i
+        v0 = self.v_i if self.v_i is not None else self.v_top
         if self.dt_i > 0.0:
-            t1_arr = np.linspace(t0, t1, 100)
-            s1_arr = self.position(t1_arr, s0=self.s_i, v0=v0, dv=self.dv_i)
+            t1_arr, s1_arr = self.position_acc(self.dv_i, s0=s0, v0=v0)
         else:
-            t1_arr, s1_arr = np.array([t0]), np.array([s0])
+            t1_arr, s1_arr = np.array([0.0]), np.array([s0])
 
         # constant-velocity phase
         t1, s1 = float(t1_arr[-1]), float(s1_arr[-1])
-        t2 = t1 + self.dt_cov
-        if t2 > t1:
+        if self.dt_cov > 0.0:
+            t2 = t1 + self.dt_cov
             t2_arr = np.linspace(t1, t2, 100)
             s2_arr = s1 + self.v_top * (t2_arr - t1)
-            t2, s2 = float(t2_arr[-1]), float(s2_arr[-1])
+            s2 = float(s2_arr[-1])
         else:
             t2_arr, s2_arr, v2_arr = None, None, None
             t2, s2 = t1, s1
 
         # final acceleration phase
         if self.dt_f > 0.0:
-            t3 = t2 + self.dt_f
-            t3_arr = np.linspace(t2, t3, 100)
-            s3_arr = self.position(t3_arr, s0=s2, v0=self.v_top, dv=self.dv_f)
+            t3_arr, s3_arr = self.position_acc(self.dv_f, t0=t2, s0=s2, v0=self.v_top)
         else:
             t3_arr, s3_arr = None, None
 
@@ -485,18 +372,14 @@ class MotionProfile(ABC):
             Numpy array with the corresponding values on the acceleration-axis.
         """
         # initial acceleration phase
-        t0, a0 = 0.0, 0.0
-        t1 = t0 + self.dt_i
-        t1_arr = np.linspace(t0, t1, 100)
-        a1_arr = self.acceleration(t1_arr, dv=self.dv_i)
+        t1_arr, a1_arr = self.acceleration(self.dv_i)
 
         # constant-velocity phase
-        t1, a1 = float(t1_arr[-1]), float(a1_arr[-1])
-        t2 = t1 + self.dt_cov
-        if t2 > t1:
+        if self.dt_cov > 0.0:
+            t1 = float(t1_arr[-1])
+            t2 = t1 + self.dt_cov
             t2_arr = np.linspace(t1, t2, 100)
             a2_arr = np.full_like(t2_arr, 0.0)
-            t2, a2 = float(t2_arr[-1]), float(a2_arr[-1])
         else:
             t2_arr = None
             a2_arr = None
@@ -504,9 +387,7 @@ class MotionProfile(ABC):
 
         # final acceleration phase
         if self.dt_f > 0:
-            t3 = t2 + self.dt_f
-            t3_arr = np.linspace(t2, t3, 100)
-            a3_arr = self.acceleration(t3_arr, dv=self.dv_f)
+            t3_arr, a3_arr = self.acceleration(self.dv_f, t0=t2)
         else:
             t3_arr, a3_arr = None, None
 
@@ -529,7 +410,7 @@ class MotionProfile(ABC):
     def plot_position_profiles(*mps: 'MotionProfile') -> LineChart:
         """
         Returns a `LineChart` with the position profiles of the motion profiles.
-        Call `show()` on the `LineChart` object to display the plot. 
+        Call `show()` on the `LineChart` object to display the plot.
         """
         chart = LineChart()
         for i, mp in enumerate(mps):
@@ -548,7 +429,7 @@ class MotionProfile(ABC):
     def plot_velocity_profiles(*mps: 'MotionProfile') -> LineChart:
         """
         Returns a `LineChart` with the velocity profiles of the motion profiles.
-        Call `show()` on the `LineChart` object to display the plot. 
+        Call `show()` on the `LineChart` object to display the plot.
         """
         chart = LineChart()
         for i, mp in enumerate(mps):
@@ -566,8 +447,8 @@ class MotionProfile(ABC):
     @staticmethod
     def plot_acceleration_profiles(*mps: 'MotionProfile') -> LineChart:
         """
-        Returns a `LineChart` with the acceleration profiles of the motion 
-        profiles. Call `show()` on the `LineChart` object to display the plot. 
+        Returns a `LineChart` with the acceleration profiles of the motion
+        profiles. Call `show()` on the `LineChart` object to display the plot.
         """
         chart = LineChart()
         for i, mp in enumerate(mps):
@@ -640,23 +521,21 @@ class MotionProfile(ABC):
     def get_ini_velocity_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` in seconds and
-        returns the velocity `v` at that moment during the initial 
+        returns the velocity `v` at that moment during the initial
         acceleration phase of the movement (`0 <= t <= dt_i`).
 
         If `t > dt_i`, the velocity at `dt_i` is returned (i.e. the top velocity
         during the constant-velocity phase).
         """
-        t0, v0 = 0.0, 0.0
-        t1 = t0 + self.dt_i
-        t_arr = np.linspace(t0, t1, 100)
-        v_arr = self.velocity(t_arr, v0=v0, dv=self.dv_i)
+        t_arr, v_arr = self.velocity_acc(self.dv_i)
+        t1 = t_arr[-1]
         v_max = v_arr[-1]
         interp = interp1d(t_arr, v_arr)
 
         def f(t: float) -> float:
-            if t0 <= t <= t1:
+            if 0.0 <= t <= t1:
                 v = interp(t)
-            elif t < t0:
+            elif t < 0.0:
                 v = 0.0
             else:
                 v = v_max
@@ -684,9 +563,8 @@ class MotionProfile(ABC):
         v0: float
             Initial velocity at the start of the final acceleration phase.
         """
-        t1 = t0 + self.dt_f
-        t_arr = np.linspace(t0, t1, 100)
-        v_arr = self.velocity(t_arr, v0=v0, dv=self.dv_f)
+        t_arr, v_arr = self.velocity_acc(self.dv_f, t0, v0)
+        t1 = t_arr[-1]
         interp = interp1d(t_arr, v_arr)
 
         def f(t: float) -> float:
@@ -710,17 +588,14 @@ class MotionProfile(ABC):
         If `s` is greater than the final acceleration position, the time moment
         is returned when the final acceleration position is reached.
         """
-        t0, v0, s0 = 0.0, 0.0, 0.0
-        t1 = t0 + self.dt_i
-        t_arr = np.linspace(t0, t1, 100)
-        s_arr = self.position(t_arr, s0=s0, v0=v0, dv=self.dv_i)
+        t_arr, s_arr = self.position_acc(self.dv_i)
         t_min = t_arr[0]
         t_max = t_arr[-1]
         s_max = s_arr[-1]
         interp_s = interp1d(s_arr, t_arr)
 
         def f(s: float) -> float:
-            if s0 <= s <= s_max:
+            if 0.0 <= s <= s_max:
                 t = interp_s(s)
             elif s > s_max:
                 t = t_max
@@ -754,9 +629,8 @@ class MotionProfile(ABC):
         v0: float
             Initial velocity at the start of the final acceleration phase.
         """
-        t1 = t0 + self.dt_f
-        t_arr = np.linspace(t0, t1, 100)
-        v_arr = self.velocity(t_arr, v0=v0, dv=self.dv_f)
+        t_arr, v_arr = self.velocity_acc(self.dv_f, t0, v0)
+        t1 = t_arr[-1]
 
         # Between t0 and t1 it is possible for the velocity to become negative
         # depending on the initial conditions.
@@ -768,8 +642,7 @@ class MotionProfile(ABC):
             sol = root_scalar(interp_t, bracket=(t_pos, t_neg))
             t1 = sol.root
 
-        t_arr = np.linspace(t0, t1, 100)
-        s_arr = self.position(t_arr, s0=s0, v0=v0, dv=self.dv_f)
+        t_arr, s_arr = self.position_acc(self.dv_f, t1, s0, v0)
         t_min = t_arr[0]
         t_max = t_arr[-1]
         s_max = s_arr[-1]
@@ -790,245 +663,110 @@ class MotionProfile(ABC):
 
 class TrapezoidalProfile(MotionProfile):
 
-    @staticmethod
-    def _calc_dt_acc(dv: float, a_top: float) -> float:
-        """
-        Required acceleration time for required velocity change `dv` when 
-        acceleration is `a_top`.
-        """
-        return abs(dv / a_top)
-    
-    def _calc_ds_i(
-        self,
-        v_i: float,
-        a_top: float,
-        dv_i: float,
-        dt_i: float
-    ) -> float:
-        """
-        Displacement during initial acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        if dt_i >= 0.0:
-            if dt_i == 0.0: return 0.0
-            if dv_i < 0.0: a_top *= -1
-            ds_i = ca.position(dt_i, t0=0.0, s0=0.0, v0=v_i, a0=a_top)
-            return abs(ds_i)
-        raise ValueError("ds_i cannot be determined.")
-    
-    def _calc_ds_f(
-        self,
-        v_top: float,
-        a_top: float,
-        dv_f: float,
-        dt_f: float
-    ) -> float:
-        """
-        Displacement during final acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        if dt_f >= 0.0:
-            if dt_f == 0.0: return 0.0
-            if dv_f < 0.0: a_top *= -1
-            ds_f = ca.position(dt_f, t0=0.0, s0=0.0, v0=v_top, a0=a_top)
-            return abs(ds_f)
-        raise ValueError("ds_f cannot be determined.")
-    
-    def position(
-        self, 
-        t_arr: np.ndarray, 
-        s0: float,
-        v0: float,
-        dv: float
-    ) -> np.ndarray:
-        if dv < 0.0:
-            a_top = -self.a_top
-        else:
-            a_top = self.a_top
-        s_arr = ca.position(t_arr, t0=t_arr[0], s0=s0, v0=v0, a0=a_top)
-        return s_arr
-    
-    def velocity(
-        self, 
-        t_arr: np.ndarray, 
-        v0: float,
-        dv: float
-    ) -> np.ndarray:
-        if dv < 0.0:
-            a_top = -self.a_top
-        else:
-            a_top = self.a_top
-        v_arr = ca.velocity(t_arr, t0=t_arr[0], v0=v0, a0=a_top)
-        return v_arr
-    
-    def acceleration(
-        self, 
-        t_arr: np.ndarray,
-        dv: float
-    ) -> np.ndarray:
+    def get_dv_min(self) -> float:
+        dv_min = self.dt_acc_min * self.a_max
+        return dv_min
+
+    def _calc_a_top(self, dv: float) -> tuple[float, float]:
         if dv == 0.0:
-            a_arr = np.full_like(t_arr, 0.0)
-            return a_arr
-        else:
+            return 0.0, 0.0
+        dv = abs(dv)
+        dt_acc = dv / self.a_max
+        if dt_acc < self.dt_acc_min:
+            a_top = dv / self.dt_acc_min
+            return a_top, self.dt_acc_min
+        return self.a_max, dt_acc
+
+    def acceleration(
+        self,
+        dv: float,
+        t0: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        a_top, dt_acc = self._calc_a_top(dv)
+        if dt_acc > 0.0:
+            t_arr = np.linspace(0.0, dt_acc, 100)
+            t_arr = t0 + t_arr
+            a_arr = np.full_like(t_arr, a_top)
             if dv < 0.0:
-                a_top = -self.a_top
-            else:
-                a_top = self.a_top
-            a_arr = ca.acceleration(t_arr, a0=a_top)
-            return a_arr
+                a_arr = np.full_like(t_arr, -a_top)
+        else:
+            t_arr = np.array([t0])
+            a_arr = np.array([0.0])
+        return t_arr, a_arr
 
 
 class SCurvedProfile(MotionProfile):
 
-    @staticmethod
-    def _calc_dt_acc(dv: float, a_top: float) -> float:
-        """
-        Required acceleration time for required velocity change `dv` when 
-        acceleration is `a_top`.
-        """
-        return abs(2 * dv / a_top)
-    
-    def _calc_ds_i(
-        self,
-        v_i: float,
-        a_top: float,
-        dv_i: float,
-        dt_i: float
-    ) -> float:
-        """
-        Displacement during initial acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        if dt_i >= 0.0:
-            if dt_i == 0.0: return 0.0
-            j1 = cj.get_constant_jerk(a_top, dv_i / 2)
-            j2 = -j1
-            s1 = cj.position(dt_i / 2, j0=j1, v0=v_i)
-            v1 = cj.velocity(dt_i / 2, j0=j1, v0=v_i)
-            a1 = cj.acceleration(dt_i / 2, j0=j1)
-            s2 = cj.position(dt_i, t0=dt_i / 2, s0=s1, v0=v1, a0=a1, j0=j2)
-            ds_i = s2 - 0.0
-            return abs(ds_i)
-        raise ValueError("ds_i cannot be determined.")
-    
-    def _calc_ds_f(
-        self,
-        v_top: float,
-        a_top: float,
-        dv_f: float,
-        dt_f: float
-    ) -> float:
-        """
-        Displacement during final acceleration phase.
-        """
-        if self.ds_tot == 0.0: return 0.0
-        if dt_f >= 0.0:
-            if dt_f == 0.0: return 0.0
-            j1 = cj.get_constant_jerk(a_top, dv_f / 2)
-            j2 = -j1
-            s1 = cj.position(dt_f / 2, j0=j1, v0=v_top)
-            v1 = cj.velocity(dt_f / 2, j0=j1, v0=v_top)
-            a1 = cj.acceleration(dt_f / 2, j0=j1)
-            s2 = cj.position(dt_f, t0=dt_f / 2, s0=s1, v0=v1, a0=a1, j0=j2)
-            ds_f = s2 - 0.0
-            return abs(ds_f)
-        raise ValueError("ds_f cannot be determined.")
+    def get_dv_min(self) -> float:
+        dv_min = self.dt_acc_min * self.a_max / 2
+        return dv_min
 
-    def position(
-        self,
-        t_arr: np.ndarray,
-        s0: float,
-        v0: float,
-        dv: float
-    ) -> np.ndarray:
-        if dv < 0.0:
-            a_top = -self.a_top
-        else:
-            a_top = self.a_top
-        dt = t_arr[-1] - t_arr[0]
-        j1 = cj.get_constant_jerk(a_top, dv / 2)
-        j2 = -j1
-        t1 = t_arr[0] + dt / 2  # flex point
-        t1_arr = t_arr[t_arr < t1]
-        t2_arr = t_arr[t_arr >= t1]
-        s1 = cj.position(t1, t0=t_arr[0], s0=s0, v0=v0, a0=0.0, j0=j1)
-        v1 = cj.velocity(t1, t0=t_arr[0], v0=v0, a0=0.0, j0=j1)
-        s1_arr = cj.position(t1_arr, t0=t_arr[0], s0=s0, v0=v0, a0=0.0, j0=j1)
-        s2_arr = cj.position(t2_arr, t0=t1, s0=s1, v0=v1, a0=a_top, j0=j2)
-        s_arr = np.concatenate((s1_arr, s2_arr))
-        return s_arr
-        
-    def velocity(
-        self,
-        t_arr: np.ndarray,
-        v0: float,
-        dv: float
-    ) -> np.ndarray:
-        if dv < 0.0:
-            a_top = -self.a_top
-        else:
-            a_top = self.a_top
-        dt = t_arr[-1] - t_arr[0]
-        j1 = cj.get_constant_jerk(a_top, dv / 2)
-        j2 = -j1
-        t1 = t_arr[0] + dt / 2  # flex point
-        t1_arr = t_arr[t_arr < t1]
-        t2_arr = t_arr[t_arr >= t1]
-        v1 = cj.velocity(t1, t0=t_arr[0], v0=v0, a0=0.0, j0=j1)
-        v1_arr = cj.velocity(t1_arr, t0=t_arr[0], v0=v0, a0=0.0, j0=j1)
-        v2_arr = cj.velocity(t2_arr, t0=t1, v0=v1, a0=a_top, j0=j2)
-        v_arr = np.concatenate((v1_arr, v2_arr))
-        return v_arr
+    def _calc_a_top(self, dv: float) -> tuple[float, float]:
+        if dv == 0.0:
+            return 0.0, 0.0
+        dv = abs(dv)
+        dt_acc = 2 * dv / self.a_max
+        if dt_acc < self.dt_acc_min:
+            theta = np.atan(2 * self.a_max / self.dt_acc_min)
+            a = -np.sin(theta) * np.cos(theta)
+            b = self.dt_acc_min * np.sin(theta)
+            c = -dv
+            a_top = min(
+                (-b + np.sqrt(b ** 2 - 4 * a * c)) / (2 * a),
+                (-b - np.sqrt(b ** 2 - 4 * a * c)) / (2 * a)
+            )
+            return a_top, self.dt_acc_min
+        return self.a_max, dt_acc
 
     def acceleration(
         self,
-        t_arr: np.ndarray,
-        dv: float
-    ) -> np.ndarray:
-        if dv == 0.0:
-            a_arr = np.full_like(t_arr, 0.0)
-            return a_arr
-        else:
-            if dv < 0.0:
-                a_top = -self.a_top
-            else:
-                a_top = self.a_top
+        dv: float,
+        t0: float = 0.0
+    ) -> tuple[np.ndarray, np.ndarray]:
+        from .elementary import cubic as cj
+        a_top, dt_acc = self._calc_a_top(dv)
+        if dt_acc > 0.0:
+            t_arr = np.linspace(t0, t0 + dt_acc, 100)
             dt = t_arr[-1] - t_arr[0]
-            j1 = cj.get_constant_jerk(a_top, dv / 2)
-            j2 = -j1
-            t1 = t_arr[0] + dt / 2  # flex point
-            t1_arr = t_arr[t_arr < t1]
-            t2_arr = t_arr[t_arr >= t1]
-            a1_arr = cj.acceleration(t1_arr, t0=t_arr[0], a0=0.0, j0=j1)
-            a2_arr = cj.acceleration(t2_arr, t0=t1, a0=a_top, j0=j2)
-            a_arr = np.concatenate((a1_arr, a2_arr))
-            return a_arr
+            if a_top < self.a_max:
+                j1 = 2 * self.a_max / self.dt_acc_min
+                theta = np.atan(j1)
+                dt_acc = a_top / np.tan(theta)
+                dt_cst = dt - 2 * dt_acc
+                t1 = t_arr[0] + dt_acc
+                t2 = t_arr[0] + dt_acc + dt_cst
 
+                # Add t1 and t2 to t_arr if not already present.
+                for t in [t1, t2]:
+                    if not np.any(np.isclose(t_arr, t)):
+                        t_arr = np.insert(t_arr, np.searchsorted(t_arr, t), t)
 
-class RotationDirection(StrEnum):
-    CW = "clockwise"
-    CCW = "counterclockwise"
+                t1_arr = t_arr[t_arr <= t1]
+                tc_arr = t_arr[(t_arr > t1) & (t_arr < t2)]
+                t2_arr = t_arr[t_arr >= t2]
+                a1_arr = cj.acceleration(t1_arr, t0=t_arr[0], a0=0.0, j0=j1)
+                ac_arr = cj.acceleration(tc_arr, t0=t1, a0=a_top, j0=0.0)
+                a2_arr = cj.acceleration(t2_arr, t0=t2, a0=a_top, j0=-j1)
+                a_arr = np.concatenate((a1_arr, ac_arr, a2_arr))
+                if dv < 0.0:
+                    a_arr = -a_arr
+            else:
+                j1 = 2 * self.a_max / dt
+                dt_acc = dt / 2
+                t1 = t_arr[0] + dt_acc
 
-    def to_bool(self) -> bool:
-        """Returns True for counterclockwise, False for clockwise."""
-        return self == RotationDirection.CCW
+                # Add t1 to t_arr if not already present.
+                if not np.any(np.isclose(t_arr, t1)):
+                    t_arr = np.insert(t_arr, np.searchsorted(t_arr, t1), t1)
 
-    def to_int(self) -> int:
-        """Returns 1 for counterclockwise, -1 for clockwise."""
-        if self == RotationDirection.CW:
-            return -1
-        return 1
-
-    def __int__(self) -> int:
-        return self.to_int()
-
-    def __bool__(self) -> bool:
-        raise TypeError("Use .to_bool() for explicit conversion.")
-
-    def __invert__(self) -> 'RotationDirection':
-        if self == RotationDirection.CCW:
-            return RotationDirection.CW
-        return RotationDirection.CCW
-
-    def toggle(self) -> 'RotationDirection':
-        return ~self
+                t1_arr = t_arr[t_arr <= t1]
+                t2_arr = t_arr[t_arr > t1]
+                a1_arr = cj.acceleration(t1_arr, t0=t_arr[0], a0=0.0, j0=j1)
+                a2_arr = cj.acceleration(t2_arr, t0=t1, a0=a_top, j0=-j1)
+                a_arr = np.concatenate((a1_arr, a2_arr))
+                if dv < 0.0:
+                    a_arr = -a_arr
+        else:
+            t_arr = np.array([t0])
+            a_arr = np.array([0.0])
+        return t_arr, a_arr

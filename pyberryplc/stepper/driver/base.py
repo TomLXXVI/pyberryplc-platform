@@ -499,7 +499,6 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         controlled internally by a `DynamicDelayGenerator` object (see
         dynamic_generator.py).
         """
-        self._start_time = time.perf_counter()
         while True:
             now = time.perf_counter()
             if now >= self._next_step_time:
@@ -512,8 +511,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
                     self._generator: DynamicDelayGenerator | None = None
                     break
             time.sleep(0.0005)
-        self._end_time = time.perf_counter()
-    
+
     def start(self) -> None:
         """
         Starts the rotation in a background thread.
@@ -522,6 +520,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         self._write_direction()
         self._generator = DynamicDelayGenerator(self.motor.step_angle, self._motion_profile)
         self._next_step_time = time.perf_counter()
+        self._start_time = time.perf_counter()
         self._thread = threading.Thread(target=self._step_loop, daemon=True)
         self._thread.start()
 
@@ -530,6 +529,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         Sends the signal to stop the motor.
         """
         self._generator.trigger_decel()
+        self._end_time = time.perf_counter()
         
 
 class RotatorType(StrEnum):
