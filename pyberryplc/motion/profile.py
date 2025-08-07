@@ -8,6 +8,10 @@ from scipy.optimize import root_scalar
 from scipy.interpolate import interp1d
 
 from pyberryplc.charts import LineChart
+from pyberryplc.utils.math_utils import find_zero_crossings
+
+
+NUM_SAMPLES = 100
 
 
 class MotionProfile(ABC):
@@ -169,7 +173,7 @@ class MotionProfile(ABC):
         s_arr += s0
         return t_arr, s_arr
 
-    def _calc_ds(self, dv: float):
+    def _calc_ds(self, dv: float, v0: float = 0.0):
         """
         Calculates the distance traveled during acceleration of the motion.
 
@@ -183,8 +187,8 @@ class MotionProfile(ABC):
         ds :
             Distance traveled during acceleration of the motion.
         """
-        _, s_arr = self.position_acc(dv)
-        ds = s_arr[-1] - s_arr[0]
+        _, s_arr = self.position_acc(dv, v0=v0)
+        ds = abs(s_arr[-1] - s_arr[0])
         return ds
 
     def _calc_dv_i(self, v_top: float) -> float:
@@ -195,19 +199,26 @@ class MotionProfile(ABC):
         dv = self.v_f - v_top if self.v_f is not None else 0.0  # assumes self.v_f = v_top
         return dv
 
-    def _determine_v_top_without_time_constraint(self) -> float:
+    def _calc_v_top_without_time_constraint(self) -> float:
 
         def fn(v_top: float) -> float:
             dv_i = self._calc_dv_i(v_top)
             dv_f = self._calc_dv_f(v_top)
-            ds_i = self._calc_ds(abs(dv_i))
-            ds_f = self._calc_ds(abs(dv_f))
+            ds_i = self._calc_ds(dv_i, v_top - dv_i)
+            ds_f = self._calc_ds(dv_f, v_top)
             ds_cov = self.ds_tot - (ds_i + ds_f)
             return ds_cov
 
-        ds_cov = fn(self.v_max)
+        v_top_ini = self.v_max
+        if self.v_f is not None and self.v_i is not None:
+            dv = self.v_f - self.v_i
+            if dv > 0.0:
+                v_top_ini = self.v_f
+            if dv < 0.0:
+                v_top_ini = self.v_i
+        ds_cov = fn(v_top_ini)
         if ds_cov > 0.0:
-            return self.v_max
+            return v_top_ini
 
         try:
             sol = root_scalar(fn, bracket=(0.0, self.v_max))
@@ -215,25 +226,50 @@ class MotionProfile(ABC):
         except ValueError:
             raise ValueError("Top velocity cannot be determined.")
 
-    def _determine_v_top_with_time_constraint(self) -> float:
+    def _calc_v_top_with_time_constraint(self) -> float:
 
         def fn(v_top: float) -> float:
             dv_i = self._calc_dv_i(v_top)
             dv_f = self._calc_dv_f(v_top)
-            _, dt_i = self._calc_a_top(abs(dv_i))
-            _, dt_f = self._calc_a_top(abs(dv_f))
-            ds_i = self._calc_ds(abs(dv_i))
-            ds_f = self._calc_ds(abs(dv_f))
-            ds_cov1 = self.ds_tot - (ds_i + ds_f)
+            _, dt_i = self._calc_a_top(dv_i)
+            _, dt_f = self._calc_a_top(dv_f)
             dt_cov = self.dt_tot - (dt_i + dt_f)
+            ds_i = self._calc_ds(dv_i, v_top - dv_i)
+            ds_f = self._calc_ds(dv_f, v_top)
+            ds_cov1 = self.ds_tot - (ds_i + ds_f)
             ds_cov2 = v_top * dt_cov
             dev = ds_cov2 - ds_cov1
             return dev
 
+        def check(v_top: float) -> float | None:
+            dv_i = self._calc_dv_i(v_top)
+            dv_f = self._calc_dv_f(v_top)
+            a_top_i, dt_i = self._calc_a_top(dv_i)
+            a_top_f, dt_f = self._calc_a_top(dv_f)
+            ds_i = self._calc_ds(dv_i, v_top - dv_i)
+            ds_f = self._calc_ds(dv_f, v_top)
+            ds_cov = self.ds_tot - (ds_i + ds_f)
+            if ds_cov > 0.0:
+                dt_cov = ds_cov / v_top
+            else:
+                dt_cov = 0.0
+            dt_tot = dt_i + dt_cov + dt_f
+            dev = abs(dt_tot - self.dt_tot)
+            if dev < 1.e-6:
+                return v_top
+            return None
+
+        v_top_arr = np.linspace(0.0, self.v_max, NUM_SAMPLES)
+        v_top_lst = find_zero_crossings(fn, v_top_arr)
+
+        v_top_lst = [
+            v_top
+            for v_top in [check(v_top_) for v_top_ in v_top_lst]
+            if v_top is not None
+        ]
         try:
-            sol = root_scalar(fn, bracket=(0.0, self.v_max))
-            return sol.root
-        except ValueError:
+            return v_top_lst[0]
+        except IndexError:
             raise ValueError("Top velocity cannot be determined.")
 
     def _calc_motion_profile(self) -> None:
@@ -241,19 +277,20 @@ class MotionProfile(ABC):
             self.dt_cov = self.dt_tot
             return
 
+        # noinspection PyUnreachableCode
         if self.ds_tot > 0.0 and self.dt_tot is None:
-            self.v_top = self._determine_v_top_without_time_constraint()
+            self.v_top = self._calc_v_top_without_time_constraint()
         elif self.ds_tot > 0.0 and self.dt_tot is not None and self.dt_tot > 0.0:
-            self.v_top = self._determine_v_top_without_time_constraint()
+            self.v_top = self._calc_v_top_with_time_constraint()
         else:
             raise ValueError("Motion profile cannot be determined.")
 
         self.dv_i = self._calc_dv_i(self.v_top)
         self.dv_f = self._calc_dv_f(self.v_top)
-        self.a_top_i, self.dt_i = self._calc_a_top(abs(self.dv_i))
-        self.a_top_f, self.dt_f = self._calc_a_top(abs(self.dv_f))
-        self.ds_i = self._calc_ds(abs(self.dv_i))
-        self.ds_f = self._calc_ds(abs(self.dv_f))
+        self.a_top_i, self.dt_i = self._calc_a_top(self.dv_i)
+        self.a_top_f, self.dt_f = self._calc_a_top(self.dv_f)
+        self.ds_i = self._calc_ds(self.dv_i, self.v_top - self.dv_i)
+        self.ds_f = self._calc_ds(self.dv_f, self.v_top)
         self.ds_cov = self.ds_tot - (self.ds_i + self.ds_f)
         if self.ds_cov > 0.0:
             self.dt_cov = self.ds_cov / self.v_top
@@ -283,7 +320,7 @@ class MotionProfile(ABC):
         v1 = float(v1_arr[-1])
         if self.dt_cov > 0.0:
             t2 = t1 + self.dt_cov
-            t2_arr = np.linspace(t1, t2, 100)
+            t2_arr = np.linspace(t1, t2, NUM_SAMPLES)
             v2_arr = np.full_like(t2_arr, self.v_top)
         else:
             t2_arr, v2_arr = None, None
@@ -333,11 +370,11 @@ class MotionProfile(ABC):
         t1, s1 = float(t1_arr[-1]), float(s1_arr[-1])
         if self.dt_cov > 0.0:
             t2 = t1 + self.dt_cov
-            t2_arr = np.linspace(t1, t2, 100)
+            t2_arr = np.linspace(t1, t2, NUM_SAMPLES)
             s2_arr = s1 + self.v_top * (t2_arr - t1)
             s2 = float(s2_arr[-1])
         else:
-            t2_arr, s2_arr, v2_arr = None, None, None
+            t2_arr, s2_arr = None, None
             t2, s2 = t1, s1
 
         # final acceleration phase
@@ -379,7 +416,7 @@ class MotionProfile(ABC):
         if self.dt_cov > 0.0:
             t1 = float(t1_arr[-1])
             t2 = t1 + self.dt_cov
-            t2_arr = np.linspace(t1, t2, 100)
+            t2_arr = np.linspace(t1, t2, NUM_SAMPLES)
             a2_arr = np.full_like(t2_arr, 0.0)
         else:
             t2_arr = None
@@ -464,10 +501,10 @@ class MotionProfile(ABC):
         chart.add_legend()
         return chart
 
-    def get_velocity_time_fn(self) -> Callable[[float], float]:
+    def get_velocity_from_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` and returns the
-        velocity `velocity` at that time moment (`0 <= t <= dt_tot`).
+        velocity `v` at that time moment (`0 <= t <= dt_tot`).
         """
         t_ax, v_ax = self.velocity_profile()
         interp = interp1d(t_ax, v_ax)
@@ -476,12 +513,35 @@ class MotionProfile(ABC):
             try:
                 v = interp(t)
             except ValueError:
-                return 0.0
+                v = v_ax[0]
+                if t > t_ax[-1]:
+                    v = v_ax[-1]
             return v
 
         return f
 
-    def get_position_time_fn(self) -> Callable[[float], float]:
+    def get_velocity_from_position_fn(self) -> Callable[[float], float]:
+        """
+        Returns a function that takes a position `s` and returns the velocity
+        `v` at that position (`0 <= s <= ds_tot`).
+        """
+        t_ax, s_ax = self.position_profile()
+        v_ax = np.array(list(map(self.get_velocity_from_time_fn(), t_ax)))
+        v_ax = np.clip(v_ax, 1e-12, None)
+        interp = interp1d(s_ax, v_ax)
+
+        def f(s: float) -> float:
+            try:
+                v = interp(s)
+            except ValueError:
+                v = v_ax[0]
+                if s > s_ax[-1]:
+                    v = v_ax[-1]
+            return v
+
+        return f
+
+    def get_position_from_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` and returns the
         position `s` at that time moment in the movement (`0 <= t <= dt_tot`).
@@ -500,7 +560,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_time_position_fn(self) -> Callable[[float], float]:
+    def get_time_from_position_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a position `s` and returns the time
         moment `t` this position is reached in the movement (`0 <= s <= ds_tot`).
@@ -519,7 +579,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_ini_velocity_time_fn(self) -> Callable[[float], float]:
+    def get_ini_velocity_from_time_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a time moment `t` in seconds and
         returns the velocity `v` at that moment during the initial
@@ -544,7 +604,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_fin_velocity_time_fn(
+    def get_fin_velocity_from_time_fn(
         self,
         t0: float,
         v0: float
@@ -580,7 +640,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_ini_time_position_fn(self) -> Callable[[float], float]:
+    def get_ini_time_from_position_fn(self) -> Callable[[float], float]:
         """
         Returns a function that takes a position `s` during the initial
         acceleration phase and returns the time moment `t` in seconds when this
@@ -606,7 +666,7 @@ class MotionProfile(ABC):
 
         return f
 
-    def get_fin_time_position_fn(
+    def get_fin_time_from_position_fn(
         self,
         t0: float,
         s0: float,
@@ -685,7 +745,7 @@ class TrapezoidalProfile(MotionProfile):
     ) -> tuple[np.ndarray, np.ndarray]:
         a_top, dt_acc = self._calc_a_top(dv)
         if dt_acc > 0.0:
-            t_arr = np.linspace(0.0, dt_acc, 100)
+            t_arr = np.linspace(0.0, dt_acc, NUM_SAMPLES)
             t_arr = t0 + t_arr
             a_arr = np.full_like(t_arr, a_top)
             if dv < 0.0:
@@ -708,7 +768,7 @@ class SCurvedProfile(MotionProfile):
         dv = abs(dv)
         dt_acc = 2 * dv / self.a_max
         if dt_acc < self.dt_acc_min:
-            theta = np.atan(2 * self.a_max / self.dt_acc_min)
+            theta = np.arctan(2 * self.a_max / self.dt_acc_min)
             a = -np.sin(theta) * np.cos(theta)
             b = self.dt_acc_min * np.sin(theta)
             c = -dv
@@ -727,11 +787,11 @@ class SCurvedProfile(MotionProfile):
         from .elementary import cubic as cj
         a_top, dt_acc = self._calc_a_top(dv)
         if dt_acc > 0.0:
-            t_arr = np.linspace(t0, t0 + dt_acc, 100)
+            t_arr = np.linspace(t0, t0 + dt_acc, NUM_SAMPLES)
             dt = t_arr[-1] - t_arr[0]
             if a_top < self.a_max:
                 j1 = 2 * self.a_max / self.dt_acc_min
-                theta = np.atan(j1)
+                theta = np.arctan(j1)
                 dt_acc = a_top / np.tan(theta)
                 dt_cst = dt - 2 * dt_acc
                 t1 = t_arr[0] + dt_acc

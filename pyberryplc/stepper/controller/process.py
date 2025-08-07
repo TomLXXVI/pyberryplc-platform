@@ -263,8 +263,6 @@ class SPMCProcess(multiprocessing.Process):
                 "message": error_msg
             })
             return
-        
-        msg: str = ""
 
         # Enter the message loop.
         while True:

@@ -7,6 +7,8 @@ import logging
 import threading
 from collections import deque
 
+from scipy.integrate import quad
+
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
 from pyberryplc.stepper.driver.dynamic_generator import DynamicDelayGenerator
 
@@ -305,15 +307,36 @@ class MotionProfileRotator(Rotator):
         Creates a list with the time delays between successive step pulses. 
         """
         if self._motion_profile.ds_tot > 0.0:
-            step_angle = self.motor.step_angle
-            final_angle = self._motion_profile.ds_tot  # + step_angle
-            num_steps = int(round(final_angle / step_angle))
-            try:
-                angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
-            except AttributeError:
-                angles = [i * step_angle for i in range(num_steps + 1)]
-            times = list(map(self._motion_profile.get_time_position_fn(), angles))
-            delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times[:-1], times[1:])]
+            num_steps = int(round(self._motion_profile.ds_tot / self.motor.step_angle))
+            s_arr = [
+                self._motion_profile.s_i + i * self.motor.step_angle
+                for i in range(num_steps + 1)
+            ]
+
+            # t = self._motion_profile.get_time_from_position_fn()  # t(s)
+            # t_arr = list(map(t, s_arr))
+            # delays = [
+            #     max(0.0, t2 - t1 - self._step_width)
+            #     for t1, t2 in zip(t_arr[:-1], t_arr[1:])
+            # ]
+
+            MIN_SPEED = 5.0
+
+            def is_safe(s0, s1):
+                return v(s0) >= MIN_SPEED and v(s1) >= MIN_SPEED
+
+            v = self._motion_profile.get_velocity_from_position_fn()  # v(s)
+            t = self._motion_profile.get_time_from_position_fn()  # t(s)
+            delays = []
+            for s0 in s_arr[:-1]:
+                s1 = s0 + self.motor.step_angle
+                if is_safe(s0, s1):
+                    delay, _ = quad(lambda s_: 1 / v(s_), s0, s1)
+                else:
+                    delay = t(s1) - t(s0)
+                delay = max(0.0, delay - self._step_width)
+                delays.append(delay)
+
             self._delays = delays
         else:
             self._delays = []
@@ -383,7 +406,7 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
                 angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
             except AttributeError:
                 angles = [i * step_angle for i in range(num_steps + 1)]
-            times = list(map(self._motion_profile.get_time_position_fn(), angles))
+            times = list(map(self._motion_profile.get_time_from_position_fn(), angles))
             delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times[:-1], times[1:])]
             self._queue = deque(delays)
         else:

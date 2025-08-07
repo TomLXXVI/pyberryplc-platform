@@ -1,5 +1,6 @@
 from dataclasses import dataclass, fields
 import json
+import csv
 
 import numpy as np
 
@@ -107,6 +108,7 @@ class Axis:
         self.s2: float = 0.0
         self.theta1: float = 0.0
         self.dtheta: float = 0.0
+        self.stepper_motor = StepperMotorMock(self.full_steps_per_rev, self.microstep_factor)
         self.rdir: RotationDirection = RotationDirection.CCW
         self.mpparams: MotionProfileParams | None = None
 
@@ -189,7 +191,7 @@ class Axis:
 
     def get_positions(self, t_arr: np.ndarray) -> np.ndarray:
         if not self.is_undefined():
-            vfn = np.vectorize(self.motion_profile.get_position_time_fn())
+            vfn = np.vectorize(self.motion_profile.get_position_from_time_fn())
             theta_arr = vfn(t_arr)
             s_arr = theta_arr / (360.0 * self.pitch)
             if self.rdir == ~self.rdir_ref:
@@ -202,9 +204,8 @@ class Axis:
 
     def get_stepper_signal(self) -> tuple[list[float], RotationDirection]:
         from pyberryplc.stepper.driver.base import TwoStageMotionProfileRotator
-        stepper_motor = StepperMotorMock(self.full_steps_per_rev, self.microstep_factor)
         # noinspection PyTypeChecker
-        rotator = TwoStageMotionProfileRotator(stepper_motor)
+        rotator = TwoStageMotionProfileRotator(self.stepper_motor)
         rotator.preprocess(self.rdir, self.motion_profile)
         return rotator.delays, self.rdir
 
@@ -617,13 +618,38 @@ class PointToPointTrajectory:
         l = [seg.get_stepper_signals() for seg in self.segments]
         return l
 
-    def save_stepper_signals(self, file_path) -> None:
+    def save_stepper_signals(self, file_path: str) -> None:
         with open(file_path, "w") as f:
             # noinspection PyTypeChecker
             json.dump(self.get_stepper_signals(), f)
 
     @classmethod
-    def load_stepper_signals(cls, file_path) -> list[dict[str, tuple[list[float], RotationDirection]]]:
-        with open(file_path, "r") as f:
+    def load_stepper_signals(cls, filepath: str) -> list[dict[str, tuple[list[float], RotationDirection]]]:
+        with open(filepath, "r") as f:
             stepper_signals = json.load(f)
             return stepper_signals
+
+    def load_points_from_csv(self, filepath: str, continuous: bool = False) -> None:
+        """
+        Load point coordinates from csv file. Units must be mm.
+
+        Parameters
+        ----------
+        filepath:
+            Path to csv file.
+        continuous:
+            Indicates whether the segments are run one by one (False) or in a single run (True).
+        """
+        with open(filepath) as fh:
+            reader = csv.reader(fh)
+            points = []
+            for row in reader:
+                if len(row) >= 2:
+                    try:
+                        x = float(row[0])
+                        y = float(row[1])
+                        points.append((x, y))
+                    except ValueError:
+                        continue
+        points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
+        self(*points, continuous=continuous)

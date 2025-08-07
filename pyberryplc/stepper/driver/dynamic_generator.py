@@ -1,4 +1,3 @@
-from pyberryplc.motion import MotionProfile
 
 
 class DynamicDelayGenerator:
@@ -9,7 +8,7 @@ class DynamicDelayGenerator:
     def __init__(
         self, 
         step_angle: float, 
-        profile: MotionProfile
+        profile
     ) -> None:
         """
         Creates a `DynamicDelayGenerator`.
@@ -29,8 +28,8 @@ class DynamicDelayGenerator:
         self.t = 0.0  # current time pointer
         self.step_index = 0
         
-        self._accel_vel_fn = self.profile.get_ini_velocity_time_fn()
-        self._accel_time_fn = self.profile.get_ini_time_position_fn()
+        self._accel_vel_fn = self.profile.get_ini_velocity_from_time_fn()
+        self._accel_time_fn = self.profile.get_ini_time_from_position_fn()
         self._decel_vel_fn = None
         self._decel_time_fn = None
 
@@ -47,8 +46,8 @@ class DynamicDelayGenerator:
         t0 = self.t                   # start time of the deceleration phase
         s0 = self.s                   # start position of the deceleration phase
         v0 = self._accel_vel_fn(t0)   # initial velocity at the start of the deceleration phase (cruise velocity)
-        self._decel_vel_fn = self.profile.get_fin_velocity_time_fn(t0, v0)
-        self._decel_time_fn = self.profile.get_fin_time_position_fn(t0, s0, v0)
+        self._decel_vel_fn = self.profile.get_fin_velocity_from_time_fn(t0, v0)
+        self._decel_time_fn = self.profile.get_fin_time_from_position_fn(t0, s0, v0)
         self.phase = "decel"
         
     def next_delay(self) -> float:
@@ -59,7 +58,7 @@ class DynamicDelayGenerator:
         if self.phase == "done": raise StopIteration("Motion complete.")
         
         target_s = self.s + self.step_angle  # next position = current position + step angle
-        t_new = 0.0  # declare the next time moment a step pulse must be send to the driver
+        t_new = 0.0  # declare the next time moment a step pulse must be sent to the driver
         
         if self.phase == "accel":
             t_new = self._accel_time_fn(target_s)

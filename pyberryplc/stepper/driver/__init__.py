@@ -2,7 +2,7 @@
 GPIO-based stepper motor implementations and speed profiles.
 """
 
-from pyberryplc.stepper.driver.base import (
+from .base import (
     StepperMotor,
     PinConfig,
     MicrostepPinConfig,
@@ -11,9 +11,9 @@ from pyberryplc.stepper.driver.base import (
     TRotator,
     TStepperMotor
 )
-from pyberryplc.stepper.driver.a4988 import A4988StepperMotor
-from pyberryplc.stepper.driver.tmc2208 import TMC2208StepperMotor
-
+from .a4988 import A4988StepperMotor
+from .tmc2208 import TMC2208StepperMotor
+from .dynamic_generator import DynamicDelayGenerator
 
 __all__ = [
     "StepperMotor",
@@ -24,5 +24,6 @@ __all__ = [
     "A4988StepperMotor",
     "TMC2208StepperMotor",
     "TRotator",
-    "TStepperMotor"
+    "TStepperMotor",
+    "DynamicDelayGenerator"
 ]

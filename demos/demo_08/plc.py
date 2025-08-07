@@ -1,8 +1,9 @@
 from pyberryplc.core import (
     MemoryVariable,
     AbstractPLC,
+    EmergencyException
 )
-from pyberryplc.motion import RotationDirection, TrapezoidalProfile
+from pyberryplc.motion import SCurvedProfile
 from pyberryplc.stepper import XYZMotionController, MotionStatus
 
 
@@ -96,8 +97,6 @@ class JogMode:
         self.motion = main.motion
         self.jog_mode_profiles = main.jog_mode_profiles
 
-        self.init_flag = True
-
         self.X0 = main.add_marker("Jog.X0")
         self.X11 = main.add_marker("Jog.X11")
         self.X12 = main.add_marker("Jog.X12")
@@ -106,7 +105,15 @@ class JogMode:
         self.X31 = main.add_marker("Jog.X31")
         self.X32 = main.add_marker("Jog.X32")
 
+        self.init_flag = True
         self.exit = MemoryVariable(False)
+
+        x_rdir_ref = self.motion_controller.x_motor_cfg["rdir_ref"]
+        y_rdir_ref = self.motion_controller.y_motor_cfg["rdir_ref"]
+        z_rdir_ref = self.motion_controller.z_motor_cfg["rdir_ref"]
+        self.x_rdir_ref = self.motion_controller.get_rotation_direction(x_rdir_ref)
+        self.y_rdir_ref = self.motion_controller.get_rotation_direction(y_rdir_ref)
+        self.z_rdir_ref = self.motion_controller.get_rotation_direction(z_rdir_ref)
 
     def _init_control(self):
         if self.init_flag:
@@ -117,13 +124,13 @@ class JogMode:
         if self.X0.active:
             if self.main.jog_xf.active or self.main.jog_xb.active:
                 self.X0.deactivate()
-                self.X11.activate()
+                self.X11.activate()  # jog X-axis
             if self.main.jog_yf.active or self.main.jog_yb.active:
                 self.X0.deactivate()
-                self.X21.activate()
+                self.X21.activate()  # jog Y-axis
             if self.main.jog_zf.active or self.main.jog_zb.active:
                 self.X0.deactivate()
-                self.X31.activate()
+                self.X31.activate()  # jog Z-axis
 
         if self.X11.active and self.motion.jog_mode_active:
             self.X11.deactivate()
@@ -155,26 +162,26 @@ class JogMode:
     def _execute_actions(self):
         if self.X11.active:
             if self.main.jog_xf.rising_edge:
-                self.motion_controller.start_jog_mode("x", RotationDirection.CCW)
+                self.motion_controller.start_jog_mode("x", self.x_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
             if self.main.jog_xb.rising_edge:
-                self.motion_controller.start_jog_mode("x", RotationDirection.CW)
+                self.motion_controller.start_jog_mode("x", ~self.x_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
 
         if self.X21.active:
             if self.main.jog_yf.rising_edge:
-                self.motion_controller.start_jog_mode("y", RotationDirection.CCW)
+                self.motion_controller.start_jog_mode("y", self.y_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
             if self.main.jog_yb.rising_edge:
-                self.motion_controller.start_jog_mode("y", RotationDirection.CW)
+                self.motion_controller.start_jog_mode("y", ~self.y_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
 
         if self.X31.active:
             if self.main.jog_zf.rising_edge:
-                self.motion_controller.start_jog_mode("z", RotationDirection.CCW)
+                self.motion_controller.start_jog_mode("z", self.z_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
             if self.main.jog_zb.rising_edge:
-                self.motion_controller.start_jog_mode("z", RotationDirection.CW)
+                self.motion_controller.start_jog_mode("z", ~self.z_rdir_ref)
                 self.main.hmi_data.data["plc_state"] = "running"
 
         if self.X12.active:
@@ -210,24 +217,24 @@ class MotionPLC(AbstractPLC):
         super().__init__(hmi_data=hmi_data, logger=logger)
 
         self.jog_mode_profiles = {
-            "slow": TrapezoidalProfile(
-                ds_tot=720.0,
-                a_max=1080.0,
+            "slow": SCurvedProfile(
+                ds_tot=1800.0,
+                a_max=360.0,
                 v_max=90.0,
                 v_i=0.0,
                 v_f=0.0
             ),
-            "medium": TrapezoidalProfile(
-                ds_tot=720.0,
-                a_max=1080.0,
+            "medium": SCurvedProfile(
+                ds_tot=1800.0,
+                a_max=1140.0,
                 v_max=360.0,
                 v_i=0.0,
                 v_f=0.0
             ),
-            "fast": TrapezoidalProfile(
-                ds_tot=720.0,
-                a_max=1080.0,
-                v_max=720.0,
+            "fast": SCurvedProfile(
+                ds_tot=1800.0,
+                a_max=4320.0,
+                v_max=1080.0,
                 v_i=0.0,
                 v_f=0.0
             )
@@ -259,6 +266,7 @@ class MotionPLC(AbstractPLC):
         self.jog_yb = self.hmi_input_register["jog_y-"]
         self.jog_zf = self.hmi_input_register["jog_z+"]
         self.jog_zb = self.hmi_input_register["jog_z-"]
+        self.emergency = self.hmi_input_register["emergency"]
 
         # Outputs to HMI
         self.x_motor_finished = self.hmi_output_register["x_motor_finished"]
@@ -267,6 +275,7 @@ class MotionPLC(AbstractPLC):
         self.y_motor_ready = self.hmi_output_register["y_motor_ready"]
         self.x_travel_time = self.hmi_output_register["x_travel_time"]
         self.y_travel_time = self.hmi_output_register["y_travel_time"]
+        self.z_travel_time = self.hmi_output_register["z_travel_time"]
 
     def _init_control(self):
         if self.init_flag:
@@ -308,6 +317,9 @@ class MotionPLC(AbstractPLC):
             self.jog.call()
 
     def control_routine(self) -> None:
+        if self.emergency.active:
+            raise EmergencyException
+
         self.motion = self.motion_controller.get_motion_status()
 
         self._init_control()

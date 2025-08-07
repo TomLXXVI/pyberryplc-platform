@@ -6,10 +6,7 @@ import pigpio
 
 
 class GPIO(ABC):
-    try:
-        def_pin_factory = PiGPIOFactory()
-    except OSError:
-        def_pin_factory = None
+    def_pin_factory = None
     
     def __init__(
         self, 
@@ -17,6 +14,12 @@ class GPIO(ABC):
         label: str,
         pin_factory: PiFactory | None = None
     ) -> None:
+
+        try:
+            self.def_pin_factory = PiGPIOFactory()
+        except OSError:
+            self.def_pin_factory = None
+
         self.pin = pin
         self.label = label
         if pin_factory is None:
