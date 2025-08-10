@@ -17,9 +17,9 @@ class PLCThreadManager:
         self._plc_class = hmi.plc_app
         self.shared_data = hmi.shared_data
         self.logger = hmi.logger
-        self._plc_instance = None
+        self.plc_instance = None
         self._plc_fault: bool = False
-        self._clean_exit: bool = False
+        self.clean_exit: bool = False
     
     def _start_plc_thread(self) -> None:
         """Creates the PLC application instance and start its scan cycle inside
@@ -28,14 +28,14 @@ class PLCThreadManager:
         def _plc_thread_fn():
             try:
                 # noinspection PyCallingNonCallable
-                self._plc_instance = self._plc_class(
+                self.plc_instance = self._plc_class(
                     hmi_data=self.shared_data,
                     logger=self.logger
                 )
-                self._plc_instance.run()
+                self.plc_instance.run(measure=True)
             except Exception as e:
                 self.logger.exception(f"PLC start-up failed: {e}")
-                self._plc_instance = None
+                self.plc_instance = None
                 gc.collect()
                 self._plc_fault = True
 
@@ -52,7 +52,7 @@ class PLCThreadManager:
         """
         def _plc_monitor_thread_fn():
             while True:
-                if not self._plc_thread.is_alive() and not self._clean_exit:
+                if not self._plc_thread.is_alive() and not self.clean_exit:
                     self.logger.error("PLC thread has crashed!")
                     self._plc_fault = True
                     break
@@ -83,8 +83,8 @@ class PLCThreadManager:
             self._start_plc_monitor_thread()
     
     def exit_plc(self) -> None:
-        self._clean_exit = True
-        self._plc_instance.exit()
+        self.clean_exit = True
+        self.plc_instance.exit()
 
 
 class AbstractHMI(ABC):
@@ -135,16 +135,16 @@ class AbstractHMI(ABC):
         self.logger = logger
         self.port = port
         
-        self._plc_manager = PLCThreadManager(self) if self.plc_app else None
+        self.plc_manager = PLCThreadManager(self) if self.plc_app else None
         self._plc_crash_dialog = None
         self.clean_exit: bool = False
         self.exit_flag: bool = False
         self._active_page: str = ""
         self.shutdown_flag: bool = False
         
-        self._main_area: ui.column | None = None
-        self._logger_area: ui.column | None = None
-        self.status_html: ui.html | None = None
+        self._main_area = None
+        self._logger_area = None
+        self.status_html = None
         
         self._log_level_colors = {
             "DEBUG": "#888",
@@ -182,8 +182,8 @@ class AbstractHMI(ABC):
         - Log updates every 1.0 second
         - Status updates every 0.5 seconds
         """
-        if self._plc_manager:
-            self.ui.timer(0.5, self._plc_manager.start_plc, once=True)
+        if self.plc_manager:
+            self.ui.timer(0.5, self.plc_manager.start_plc, once=True)
             self.ui.timer(1.0, self._update_log_page)
             self.ui.timer(0.5, self._update_status)
 
@@ -221,15 +221,15 @@ class AbstractHMI(ABC):
         self.setup_timers()
         self.ui.run(title=self.title, port=self.port, reload=False, show=False)
 
-    async def _exit_hmi(self) -> None:
+    async def exit_hmi(self) -> None:
         """Callback to cleanly close the PLC and HMI application."""
         exit_dialog = ExitDialog(self)
         await exit_dialog.show()
         if self.exit_flag:
             self.ui.navigate.to("/shutdown")
             self.logger.info("Shutting down PLC and HMI...")
-            if self._plc_manager:
-                self._plc_manager.exit_plc()
+            if self.plc_manager:
+                self.plc_manager.exit_plc()
             self.ui.timer(2.0, self.app.shutdown, once=True)
     
     def _build_navbar(self):
@@ -241,7 +241,7 @@ class AbstractHMI(ABC):
                 with self.ui.row().classes("gap-4"):
                     self.ui.button("HMI", on_click=lambda: self.ui.navigate.to("/"))
                     self.ui.button("Log", on_click=lambda: self.ui.navigate.to("/log"))
-                self.ui.button("Exit", color="red", on_click=self._exit_hmi)
+                self.ui.button("Exit", color="red", on_click=self.exit_hmi)
             
             # Status bar
             self.status_html = self.ui.html('<b>Status</b>').classes(
@@ -361,12 +361,13 @@ class PLCCrashDialog:
     def _abort_hmi(self) -> None:
         self.close()
         self.hmi.logger.warning("PLC operation has been aborted by the user...")
-        self.hmi.app.shutdown()
+        self.hmi.ui.navigate.to("/shutdown")
+        self.hmi.ui.timer(2.0, self.hmi.app.shutdown, once=True)
 
     def _restart_plc(self) -> None:
         self.close()
-        if self.hmi._plc_manager:
-            self.hmi._plc_manager.restart_plc()
+        if self.hmi.plc_manager:
+            self.hmi.plc_manager.restart_plc()
 
     def open(self) -> None:
         self._dialog.open()

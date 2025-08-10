@@ -1,4 +1,4 @@
-from pyberryplc.motion import (
+from pyberryplc.motion.profile_alt import (
     RotationDirection,
     SCurvedProfile
 )
@@ -14,9 +14,9 @@ from pyberryplc.utils.keyboard_input import KeyInput
 
 def create_motion_profile():
     mp = SCurvedProfile(
-        ds_tot=720.0,
-        a_max=360.0,
-        v_max=180.0,
+        ds_tot=1800.0,
+        a_max=4320.0,
+        v_max=1080.0,
         v_i=0.0,
         v_f=0.0
     )
@@ -62,12 +62,12 @@ def create_stepper_z(logger):
 def configure_stepper(stepper: TMC2208StepperMotor):
     stepper.enable()
     stepper.configure_microstepping(
-        resolution="1/2",
+        resolution="1/16",
         full_steps_per_rev=200
     )
     stepper.set_current_via_uart(
         run_current_pct=77,
-        hold_current_pct=10
+        hold_current_pct=25
     )
 
 
@@ -131,7 +131,7 @@ class JogSubroutine:
                 "or b-key for backward motion."
             )
 
-        if self.X_11.rising_edge != self.X_21.rising_edge:
+        if self.X_11.rising_edge != self.X_21.rising_edge:  # same as XOR
             if self.X_11.rising_edge:
                 self.stepper.rotator.direction = RotationDirection.CCW
             if self.X_21.rising_edge:
@@ -164,7 +164,7 @@ class MultiAxisPLC(AbstractPLC):
         self.X_22 = self.add_marker("X_22")
         self.X_01 = self.add_marker("X_01")
 
-        self.subroutine = None
+        self.subroutine: JogSubroutine | None = None
 
     def _init(self):
         if self.init_flag:
@@ -198,7 +198,7 @@ class MultiAxisPLC(AbstractPLC):
 
     def _execute_actions(self):
         if self.X0.rising_edge:
-            self.subroutine = None
+            self.subroutine: JogSubroutine | None = None
             self.logger.info(
                 "Press x-key for x-axis motion, "
                 "or y-key for y-axis motion, "

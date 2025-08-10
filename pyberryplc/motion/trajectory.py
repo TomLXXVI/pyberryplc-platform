@@ -631,12 +631,12 @@ class PointToPointTrajectory:
 
     def load_points_from_csv(self, filepath: str, continuous: bool = False) -> None:
         """
-        Load point coordinates from csv file. Units must be mm.
+        Load point coordinates from a CSV file. Units must be mm.
 
         Parameters
         ----------
         filepath:
-            Path to csv file.
+            Path to CSV file.
         continuous:
             Indicates whether the segments are run one by one (False) or in a single run (True).
         """

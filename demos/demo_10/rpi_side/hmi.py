@@ -1,16 +1,21 @@
-import io
-import csv
+from pathlib import Path
+import json
 import tomllib
-import asyncio
+import hashlib
 
 import plotly.graph_objects as go
-from nicegui import run
 
 from pyberryplc.hmi import AbstractHMI
 from pyberryplc.utils.log_utils import init_logger
 from pyberryplc.core.memory import HMISharedData
+from pyberryplc.motion import RotationDirection, PointToPointTrajectory, SCurvedProfile
 
 from plc import MotionPLC
+
+
+BASE_DIR = Path(__file__).parent.resolve()
+SAVE_DIRECTORY = BASE_DIR / 'trajectory_outputs'
+SAVE_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
 
 hmi_data = HMISharedData(
@@ -170,42 +175,40 @@ class AutomaticPanel:
         self.parent = parent
         self.ui = parent.ui
 
-        self.trajectory_plotter = TrajectoryPlotlyPlotter(self.ui)
-        self.points = []
-        self.trajectory = None
+        self.json_file_select = None
+        self.selected_file = ""
 
-        self.motor_config = self._read_motor_configurations()
-        self.alpha_max_slider = None
-        self.omega_max_slider = None
-        self.cont_motion_switch = None
-        self._busy_flag = False
-        self.pos = None
-        self.vel = None
-        self.acc = None
-        self.stepper_signals = []
+        self.signals_path = None
+        self.meta_path = None
+
+        self.points_mm = []
+        self.trajectory = None
+        self.pos_profile = None
+        self.vel_profile = None
+        self.acc_profile = None
+        self.stepper_signals = None
+
+        self.selected_profile = None
+
+        self.trajectory_plotter = TrajectoryPlotlyPlotter(self.ui)
+        self.trajectory_plot = None
+
         self.motion_profile_plotter = MotionProfilePlotlyPlotter(self.ui)
         self.motion_profile_plot = None
-        self.selected_profile = "velocity"
+
+        self.motor_config = self._read_motor_configurations()
 
     @classmethod
     def build(cls, parent):
         self = cls(parent)
 
         with self.ui.tab_panel("Automatic Mode"):
-            self.ui.label("Automatic Mode").classes("text-xl mb-2")
-
             with self.ui.row():
-                with self.ui.column():
-                    # Trajectory CSV file upload widget
-                    self._build_csv_upload_widget()
+                with self.ui.column().classes("gap-4"):
+                    # JSON file select widget
+                    self._build_file_select_widget()
 
-                    # Slider panel alpha_max and omega_max
-                    self._build_motion_profile_sliders()
-
-                    # Switch continuous motion
-                    self._build_cont_motion_switch()
-
-                with self.ui.column():
+                with self.ui.column().classes("gap-4"):
                     with self.ui.row():
                         # Trajectory plot
                         self._build_trajectory_plot()
@@ -216,43 +219,24 @@ class AutomaticPanel:
                 self.ui.separator()
 
             with self.ui.row():
-                self.ui.button("Send to PLC", on_click=self._send_to_plc)
-                self.ui.button("EMERGENCY STOP", color="red", on_click=self._raise_emergency)
+                self.ui.button("Send to PLC", on_click=self._send_to_plc, color="primary")
+                self.ui.button("EMERGENCY STOP", on_click=self._raise_emergency, color="red")
 
         return self
 
-    def _build_csv_upload_widget(self):
-        with self.ui.column().classes("border rounded p-4"):
-            self.ui.upload(
-                label="Select Trajectory CSV",
-                auto_upload=True,
-                max_files=1,
-                on_upload=self._on_csv_upload
-            ).props("accept=.csv").classes("mb-4 w-full")
+    def _build_file_select_widget(self):
+        with self.ui.column().classes("w-full border rounded p-4"):
+            self.json_file_select = self.ui.select(
+                options=self._list_json_files(),
+                label="Select JSON trajectory",
+                on_change=self._set_selected_file
+            ).classes("w-full")
 
-    def _build_motion_profile_sliders(self):
-        with self.ui.column().classes("border rounded p-4 w-full"):
-            self.ui.label("Maximum acceleration (°/s²)")
-            self.alpha_max_slider = self.ui.slider(
-                min=100.0, max=5000.0, step=100.0, value=1500.0,
-                on_change=self._update_contents
-            )
-            self.ui.label().bind_text_from(self.alpha_max_slider, "value")
-
-            self.ui.label("Maximum speed (°/s)")
-            self.omega_max_slider = self.ui.slider(
-                min=100.0, max=5000.0, step=100.0, value=1500.0,
-                on_change=self._update_contents
-            )
-            self.ui.label().bind_text_from(self.omega_max_slider, "value")
-
-    def _build_cont_motion_switch(self):
-        with self.ui.column().classes("border rounded p-4 w-full"):
-            self.cont_motion_switch = self.ui.switch(
-                "continuous motion",
-                value=False,
-                on_change=self._update_contents
-            )
+            self.ui.button(
+                "Load trajectory",
+                on_click=self._load_selected_json,
+                color="primary"
+            ).classes("mt-2")
 
     def _build_trajectory_plot(self):
         with self.ui.column().classes("border rounded p-4"):
@@ -268,113 +252,80 @@ class AutomaticPanel:
                 self.ui.tab("Acceleration")
             self.motion_profile_plot = self.motion_profile_plotter.create_plot()
 
-    async def _on_csv_upload(self, event_args):
-        try:
-            self.points.clear()
-            self.points = self._read_points_from_csv(event_args.content)
-            if len(self.points) < 2:
-                self.ui.notify("Not enough valid points in file.", color="red")
-                return
-            await self._update_contents()
-        except Exception as ex:
-            self.ui.notify(f"Error while reading file: {ex}", color="red")
+    @staticmethod
+    def _list_json_files() -> list[str]:
+        return sorted([
+            f.name.removesuffix(".signals.json")
+            for f in SAVE_DIRECTORY.glob("*.signals.json")
+        ])
 
-    def _send_to_plc(self) -> None:
-        if not self.trajectory:
-            self.ui.notify("No trajectory to send.", color="red")
+    def _set_selected_file(self, event_args):
+        self.selected_file = event_args.value
+
+    def _load_selected_json(self) -> None:
+        if not self.selected_file:
+            self.ui.notify("No file selected.", color="red")
             return
-        self.parent.hmi_data.data["trajectory"] = self.stepper_signals
-        self.parent.hmi_data.buttons["auto_start"] = True
-        self.ui.notify("Trajectory sent to PLC.")
 
-    def _raise_emergency(self) -> None:
-        self.parent.hmi_data.buttons["emergency"] = True
+        self.signals_path = SAVE_DIRECTORY / f"{self.selected_file}.signals.json"
+        self.meta_path = SAVE_DIRECTORY / f"{self.selected_file}.meta.json"
 
-    def _on_tab_change(self, event_args) -> None:
-        self.selected_profile = event_args.value.lower()
-        self._show_motion_profile()
+        if not self.signals_path.exists() or not self.meta_path.exists():
+            self.ui.notify(f"File not found: {self.selected_file}", color="red")
+            return
 
-    @staticmethod
-    def _read_points_from_csv(content):
-        text_stream = io.TextIOWrapper(content, encoding="utf-8")
-        reader = csv.reader(text_stream)
-        points = []
-        for row in reader:
-            if len(row) >= 2:
-                try:
-                    x = float(row[0])
-                    y = float(row[1])
-                    points.append((x, y))
-                except ValueError:
-                    continue
-        return points
+        self._load_stepper_signals()
+        self._load_trajectory()
+        self.ui.notify(f"Loaded {self.selected_file}", color="green")
 
-    @staticmethod
-    def _read_motor_configurations() -> dict:
-        from pyberryplc.motion import RotationDirection
+    def _load_stepper_signals(self):
+        with open(self.signals_path, 'r') as f:
+            self.stepper_signals = json.load(f)
 
-        data = tomllib.load(open("motor_config.toml", "rb"))
-        x_motor_data = data["x_motor"]
-        y_motor_data = data["y_motor"]
-        x_full_steps_per_rev = x_motor_data["microstepping"]["full_steps_per_rev"]
-        y_full_steps_per_rev = y_motor_data["microstepping"]["full_steps_per_rev"]
+    def _load_trajectory(self):
+        with open(self.meta_path, "r") as f:
+            metadata = json.load(f)
+
+        cfg_bytes = (BASE_DIR / "motor_config.toml").read_bytes()
+        current_hash = hashlib.sha256(cfg_bytes).hexdigest()
+        if current_hash != metadata["motor_config_sha256"]:
+            self.ui.notify(
+                "Warning: motor_config differs from planner_config.",
+                color="orange"
+            )
+
         try:
-            x_microstep_factor = int(x_motor_data["microstepping"]["resolution"].split("/")[-1])
-        except (IndexError, ValueError):
-            x_microstep_factor = 1
-        try:
-            y_microstep_factor = int(y_motor_data["microstepping"]["resolution"].split("/")[-1])
-        except (IndexError, ValueError):
-            y_microstep_factor = 1
-        x_pitch = x_motor_data["pitch"]
-        y_pitch = y_motor_data["pitch"]
-        x_rdir_ref = RotationDirection.CW if x_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
-        y_rdir_ref = RotationDirection.CW if y_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
-        return {
-            "full_steps_per_rev": (x_full_steps_per_rev, y_full_steps_per_rev),
-            "microstep_factor": (x_microstep_factor, y_microstep_factor),
-            "pitch": (x_pitch, y_pitch),
-            "rdir_ref": (x_rdir_ref, y_rdir_ref),
-        }
+            profile_type = SCurvedProfile if metadata["profile_type"] == "SCurvedProfile" else None
+            self.trajectory = PointToPointTrajectory(
+                n_axes=2,
+                profile_type=profile_type,
+                pitch=self.motor_config["pitch"],
+                rdir_ref=self.motor_config["rdir_ref"],
+                alpha_max=tuple(metadata["alpha_max"]),
+                omega_max=tuple(metadata["omega_max"]),
+                full_steps_per_rev=self.motor_config["full_steps_per_rev"],
+                microstep_factor=self.motor_config["microstep_factor"]
+            )
+            self.points_mm = metadata["points"]
+            points_m = [(x / 1000, y / 1000) for x, y in self.points_mm]
+            self.trajectory(*points_m, continuous=metadata["continuous_motion"])
+            self.pos_profile = self.trajectory.position_profiles
+            self.vel_profile = self.trajectory.velocity_profiles
+            self.acc_profile = self.trajectory.acceleration_profiles
 
-    @staticmethod
-    def _compute_trajectory(
-        points: list[tuple[float, float]],
-        alpha_max: tuple[float, float],
-        omega_max: tuple[float, float],
-        cont_motion: bool,
-        motor_config: dict
-    ) -> dict:
-        from pyberryplc.motion import PointToPointTrajectory, SCurvedProfile
+            self.selected_profile = "velocity"
+            self._show_trajectory()
+            self._show_motion_profile()
 
-        points = [(x / 1000, y / 1000) for x, y in points]  # mm -> m
-        trajectory = PointToPointTrajectory(
-            n_axes=2,
-            profile_type=SCurvedProfile,
-            pitch=motor_config["pitch"],
-            rdir_ref=motor_config["rdir_ref"],
-            alpha_max=alpha_max,
-            omega_max=omega_max,
-            full_steps_per_rev=motor_config["full_steps_per_rev"],
-            microstep_factor=motor_config["microstep_factor"]
-        )
-        trajectory(*points, continuous=cont_motion)
-        delays = trajectory.get_stepper_signals()
-
-        return {
-            "trajectory": trajectory,
-            "pos": trajectory.position_profiles,
-            "vel": trajectory.velocity_profiles,
-            "acc": trajectory.acceleration_profiles,
-            "delays": delays
-        }
+        except Exception as e:
+            self.ui.notify(f"Failed to load: {e}", color="red")
 
     def _show_trajectory(self):
-        if not self.points:
-            self.ui.notify("No points loaded.", color="red")
+        if not self.points_mm:
+            self.ui.notify("No trajectory loaded.", color="red")
             return
 
-        x_vals, y_vals = zip(*self.points)
+        x_vals, y_vals = zip(*self.points_mm)
         if self.trajectory:
             self.trajectory_plotter.draw_figure(
                 x_vals, y_vals,
@@ -385,66 +336,79 @@ class AutomaticPanel:
         self.trajectory_plot.update()
 
     def _show_motion_profile(self) -> None:
-        if not self.vel:
+        if not self.vel_profile:
             self.ui.notify("No motion profile available.", color="red")
             return
 
         if self.selected_profile == "position":
-            t_x = self.pos["x"][0]
-            y_x = self.pos["x"][1] * 1000  # mm
-            t_y = self.pos["y"][0]
-            y_y = self.pos["y"][1] * 1000
+            t_x = self.pos_profile["x"][0]
+            y_x = self.pos_profile["x"][1] * 1000  # mm
+            t_y = self.pos_profile["y"][0]
+            y_y = self.pos_profile["y"][1] * 1000
             y_label = "position, mm"
         elif self.selected_profile == "acceleration":
-            t_x = self.acc["x"][0]
-            y_x = self.acc["x"][1] * 1000  # mm/s²
-            t_y = self.acc["y"][0]
-            y_y = self.acc["y"][1] * 1000
+            t_x = self.acc_profile["x"][0]
+            y_x = self.acc_profile["x"][1] * 1000  # mm/s²
+            t_y = self.acc_profile["y"][0]
+            y_y = self.acc_profile["y"][1] * 1000
             y_label = "acceleration, mm/s²"
         else:
-            t_x = self.vel["x"][0]
-            y_x = self.vel["x"][1] * 1000  # mm/s
-            t_y = self.vel["y"][0]
-            y_y = self.vel["y"][1] * 1000
+            t_x = self.vel_profile["x"][0]
+            y_x = self.vel_profile["x"][1] * 1000  # mm/s
+            t_y = self.vel_profile["y"][0]
+            y_y = self.vel_profile["y"][1] * 1000
             y_label = "velocity, mm/s"
 
         self.motion_profile_plotter.draw_figure(x=(t_x, t_y), y=(y_x, y_y))
         self.motion_profile_plotter.set_figure_layout(y_label)
         self.motion_profile_plot.update()
 
-    async def _update_contents(self):
-        if self._busy_flag:
-            return
+    @staticmethod
+    def _read_motor_configurations() -> dict:
+        data = tomllib.load(open(BASE_DIR / "motor_config.toml", "rb"))
 
-        self._busy_flag = True
+        x_motor_data = data["x_motor"]
+        y_motor_data = data["y_motor"]
 
-        self.parent.spinner_overlay.open()
-        await asyncio.sleep(0)
+        x_full_steps_per_rev = x_motor_data["microstepping"]["full_steps_per_rev"]
+        y_full_steps_per_rev = y_motor_data["microstepping"]["full_steps_per_rev"]
 
         try:
-            result = await run.cpu_bound(
-                self._compute_trajectory,
-                self.points,
-                (self.alpha_max_slider.value, self.alpha_max_slider.value),
-                (self.omega_max_slider.value, self.omega_max_slider.value),
-                self.cont_motion_switch.value,
-                self.motor_config
-            )
-        except Exception as e:
-            self.ui.notify(f"Error: {e}", color="red")
-            return
-        finally:
-            self.parent.spinner_overlay.close()
-            self._busy_flag = False
+            x_microstep_factor = int(x_motor_data["microstepping"]["resolution"].split("/")[-1])
+        except (IndexError, ValueError):
+            x_microstep_factor = 1
+        try:
+            y_microstep_factor = int(y_motor_data["microstepping"]["resolution"].split("/")[-1])
+        except (IndexError, ValueError):
+            y_microstep_factor = 1
 
-        self.trajectory = result["trajectory"]
-        self.pos = result["pos"]
-        self.vel = result["vel"]
-        self.acc = result["acc"]
-        self.stepper_signals = result["delays"]
+        x_pitch = x_motor_data["pitch"]
+        y_pitch = y_motor_data["pitch"]
 
+        x_rdir_ref = RotationDirection.CW if x_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
+        y_rdir_ref = RotationDirection.CW if y_motor_data["rdir_ref"] == "clockwise" else RotationDirection.CCW
+
+        return {
+            "full_steps_per_rev": (x_full_steps_per_rev, y_full_steps_per_rev),
+            "microstep_factor": (x_microstep_factor, y_microstep_factor),
+            "pitch": (x_pitch, y_pitch),
+            "rdir_ref": (x_rdir_ref, y_rdir_ref),
+        }
+
+    def _on_tab_change(self, event_args) -> None:
+        self.selected_profile = event_args.value.lower()
         self._show_motion_profile()
-        self._show_trajectory()
+
+    def _send_to_plc(self) -> None:
+        if not self.stepper_signals:
+            self.ui.notify("No trajectory to send.", color="red")
+            return
+        self.parent.hmi_data.data["trajectory"] = self.stepper_signals
+        self.parent.hmi_data.buttons["auto_start"] = True
+        self.ui.notify("Trajectory sent to PLC.")
+
+    def _raise_emergency(self) -> None:
+        self.parent.hmi_data.buttons["emergency"] = True
 
 
 class JogModePanel:
@@ -459,8 +423,6 @@ class JogModePanel:
 
         with self.ui.tab_panel("Jog Mode"):
             with self.ui.column():
-                self.ui.label("Jog Mode").classes("text-xl mb-2")
-
                 with self.ui.column().classes("border rounded p-4"):
                     self.ui.label().bind_text_from(
                         self.parent.hmi_data.data,

@@ -12,7 +12,7 @@ from scipy.integrate import quad
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
 from pyberryplc.stepper.driver.dynamic_generator import DynamicDelayGenerator
 
-from pyberryplc.motion import MotionProfile, RotationDirection
+from pyberryplc.motion.profile_alt import MotionProfile, RotationDirection
 
 
 class Rotator(ABC):
@@ -49,8 +49,8 @@ class Rotator(ABC):
     def direction(self, value: RotationDirection) -> None:
         """
         Sets the rotation direction of the stepper motor:
-        - either `RotationDirection.CLOCKWISE`, or 
-        - `RotationDirection.COUNTERCLOCKWISE`.
+        - either `RotationDirection.CW`, or
+        - `RotationDirection.CCW`.
         """
         self._direction = value
 
@@ -402,10 +402,7 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
             step_angle = self.motor.step_angle
             final_angle = self._motion_profile.ds_tot   # + step_angle
             num_steps = int(round(final_angle / step_angle))
-            try:
-                angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
-            except AttributeError:
-                angles = [i * step_angle for i in range(num_steps + 1)]
+            angles = [self._motion_profile.s_i + i * step_angle for i in range(num_steps + 1)]
             times = list(map(self._motion_profile.get_time_from_position_fn(), angles))
             delays = [max(0.0, t2 - t1 - self._step_width) for t1, t2 in zip(times[:-1], times[1:])]
             self._queue = deque(delays)
@@ -514,26 +511,44 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         deceleration behavior of the motion.
         """
         self._motion_profile = value
-    
+
     def _step_loop(self):
         """
-        Executes the rotation by sending timed step pulse signals to the stepper
-        motor driver in a while-loop. The continuation of the while-loop is
-        controlled internally by a `DynamicDelayGenerator` object (see
-        dynamic_generator.py).
+        Executes the rotation by sending timed step pulses with hybrid timing.
+
+        Strategy:
+        - Sleep coarsely while the next step time is still far away.
+        - Busy-spin only for the final microseconds (spin guard) for precision.
+        This avoids hard-capping the achievable step rate (e.g. at 2 kHz when
+        sleeping 0.5 ms each loop) while keeping CPU usage reasonable.
         """
+        SLEEP_CHUNK = 0.0002  # coarse sleep up to 0.2 ms (tune)
+        SPIN_GUARD = 50e-6    # spin during final ~50 µs (tune)
+
         while True:
             now = time.perf_counter()
-            if now >= self._next_step_time:
+            remaining = self._next_step_time - now
+
+            if remaining <= 0.0:
                 try:
                     self._pulse_step_pin()
                     delay = self._generator.next_delay()
-                    self._next_step_time = now + delay
+                    # schedule from "now" to avoid backlogs after oversleep
+                    self._next_step_time = time.perf_counter() + delay
                 except StopIteration:
                     self._busy = False
-                    self._generator: DynamicDelayGenerator | None = None
+                    self._generator = None
                     break
-            time.sleep(0.0005)
+                continue
+
+            if remaining > SPIN_GUARD:
+                sleep_for = min(max(0.0, remaining - SPIN_GUARD), SLEEP_CHUNK)
+                if sleep_for > 0.0:
+                    time.sleep(sleep_for)
+            else:
+                target_ns = int(self._next_step_time * 1e9)
+                while time.perf_counter_ns() < target_ns:
+                    pass
 
     def start(self) -> None:
         """

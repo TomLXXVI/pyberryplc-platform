@@ -1,6 +1,7 @@
 import numpy as np
 
-from pyberryplc.motion import PointToPointTrajectory, SCurvedProfile, RotationDirection
+from pyberryplc.motion.trajectory import PointToPointTrajectory
+from pyberryplc.motion.profile_alt import SCurvedProfile, RotationDirection
 from pyberryplc.charts import LineChart
 
 

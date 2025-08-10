@@ -28,14 +28,14 @@ class DynamicDelayGenerator:
         self.t = 0.0  # current time pointer
         self.step_index = 0
         
-        self._accel_vel_fn = self.profile.get_ini_velocity_from_time_fn()
-        self._accel_time_fn = self.profile.get_ini_time_from_position_fn()
-        self._decel_vel_fn = None
-        self._decel_time_fn = None
+        self._v_accel = self.profile.get_ini_velocity_from_time_fn()
+        self._t_accel = self.profile.get_ini_time_from_position_fn()
+        self._v_decel = None
+        self._t_decel = None
 
         self.phase = "accel"  # a new rotation always starts in the acceleration phase
-        self.cruise_velocity = self._accel_vel_fn(self.profile.dt_i)  # velocity at the end of the initial acceleration phase
-        self._stop_velocity_threshold = 1e-3
+        self.v_cruise = self._v_accel(self.profile.dt_i)  # velocity at the end of the initial acceleration phase
+        self.v_min = 1e-3
 
     def trigger_decel(self):
         """
@@ -45,9 +45,9 @@ class DynamicDelayGenerator:
         """
         t0 = self.t                   # start time of the deceleration phase
         s0 = self.s                   # start position of the deceleration phase
-        v0 = self._accel_vel_fn(t0)   # initial velocity at the start of the deceleration phase (cruise velocity)
-        self._decel_vel_fn = self.profile.get_fin_velocity_from_time_fn(t0, v0)
-        self._decel_time_fn = self.profile.get_fin_time_from_position_fn(t0, s0, v0)
+        v0 = self.v_cruise            # initial velocity at the start of the deceleration phase (cruise velocity)
+        self._v_decel = self.profile.get_fin_velocity_from_time_fn(t0, v0)
+        self._t_decel = self.profile.get_fin_time_from_position_fn(t0, s0, v0)
         self.phase = "decel"
         
     def next_delay(self) -> float:
@@ -61,23 +61,23 @@ class DynamicDelayGenerator:
         t_new = 0.0  # declare the next time moment a step pulse must be sent to the driver
         
         if self.phase == "accel":
-            t_new = self._accel_time_fn(target_s)
+            t_new = self._t_accel(target_s)
             # when the next time moment exceeds the acceleration time duration 
             # of the motion profile, continue to the cruising phase of the 
             # rotation. 
             if t_new >= self.profile.dt_i:
                 self.phase = "cruise"
-                t_new = self.t + self.step_angle / self.cruise_velocity
+                t_new = self.t + self.step_angle / self.v_cruise
         
         elif self.phase == "cruise":
-            t_new = self.t + self.step_angle / self.cruise_velocity
+            t_new = self.t + self.step_angle / self.v_cruise
 
         # the deceleration phase must be triggered externally by calling method
         # `trigger_decel()`.
         elif self.phase == "decel":
-            t_new = self._decel_time_fn(target_s)
-            v_new = self._decel_vel_fn(t_new)
-            if v_new < self._stop_velocity_threshold:
+            t_new = self._t_decel(target_s)
+            v_new = self._v_decel(t_new)
+            if v_new < self.v_min:
                 # when the velocity is close to zero, the end of the rotation is 
                 # signaled by raising `StopIteration`.
                 self.phase = "done"
