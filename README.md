@@ -72,7 +72,7 @@ process uses a `Pipe` object. Both classes utilize a `TwoStageProfileRotator`, s
 (`preprocess()`) from rotation execution (`rotate()`). Class `MPMCProcess` preprocesses a motion profile (`MotionProfile`
 object) internally, while class `SPMCProcess` expects to receive step pulse signals directly from the master process.
 
-Class `SPMotorController` in module `controller.py` continues to build upon the `SPMCProcess` allowing to quickly 
+Class `MotorController` in module `controller.py` continues to build upon the `SPMCProcess` allowing to quickly 
 implement a motor control process. 
 This class is then used in class `XYZMotionController` for controlling the TMC2208 stepper motor drivers of one, two, or
 three axes (X, Y, and/or Z) so that 1D-, 2D-, or 3D-trajectories can be executed. The configuration settings of the 
@@ -120,4 +120,4 @@ pip install -r requirements.txt
 ```
 
 When this is done, you might want to explore the `demos` folder, which contains practical examples covering PLC logic, 
-GPIO control, stepper motor motion, HMI interaction, and full multi-axis trajectories.
+stepper motor motion, HMI interaction, and full multi-axis trajectories.
