@@ -11,7 +11,7 @@ from pyberryplc.stepper.driver.tmc2208 import TMC2208StepperMotor
 from pyberryplc.stepper.uart.tmc2208_uart import TMC2208UART
 from pyberryplc.stepper.controller.process import SPMCProcess
 
-from pyberryplc.motion.profile import RotationDirection, MotionProfile
+from pyberryplc.motion import RotationDirection, MotionProfile
 
 from pyberryplc.core import MemoryVariable, CounterUp, TAbstractPLC
 
@@ -111,7 +111,7 @@ class MotorController:
     def enable(self) -> None:
         """
         Starts the `run()` method of the `SPMCProcess`. After this function
-        has been called, messages (commands) can be send to the `SPMCProcess`.
+        has been called, messages (commands) can be sent to the `SPMCProcess`.
         """
         self._process.start()
 
@@ -236,8 +236,8 @@ class MotorController:
         rotation.
         """
         # When a move-command is given, `self.motor_ready` must be set to False
-        # to signal that a move-command is busy. When the move-command is
-        # completed, it will be signaled by the process (see method
+        # in order to signal that a move-command is busy. When the move-command
+        # is completed, it will be signaled by the process (see method
         # `_set_status()`) and `self.motor_ready` is then set to True again.
         if self._motor_ready.state:
             self._motor_ready.update(False)

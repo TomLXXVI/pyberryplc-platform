@@ -7,12 +7,10 @@ import logging
 import threading
 from collections import deque
 
-from scipy.integrate import quad
-
 from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
 from pyberryplc.stepper.driver.dynamic_generator import DynamicDelayGenerator
 
-from pyberryplc.motion.profile_alt import MotionProfile, RotationDirection
+from pyberryplc.motion import MotionProfile, RotationDirection
 
 
 class Rotator(ABC):
@@ -313,29 +311,29 @@ class MotionProfileRotator(Rotator):
                 for i in range(num_steps + 1)
             ]
 
-            # t = self._motion_profile.get_time_from_position_fn()  # t(s)
-            # t_arr = list(map(t, s_arr))
-            # delays = [
-            #     max(0.0, t2 - t1 - self._step_width)
-            #     for t1, t2 in zip(t_arr[:-1], t_arr[1:])
-            # ]
-
-            MIN_SPEED = 5.0
-
-            def is_safe(s0, s1):
-                return v(s0) >= MIN_SPEED and v(s1) >= MIN_SPEED
-
-            v = self._motion_profile.get_velocity_from_position_fn()  # v(s)
             t = self._motion_profile.get_time_from_position_fn()  # t(s)
-            delays = []
-            for s0 in s_arr[:-1]:
-                s1 = s0 + self.motor.step_angle
-                if is_safe(s0, s1):
-                    delay, _ = quad(lambda s_: 1 / v(s_), s0, s1)
-                else:
-                    delay = t(s1) - t(s0)
-                delay = max(0.0, delay - self._step_width)
-                delays.append(delay)
+            t_arr = list(map(t, s_arr))
+            delays = [
+                max(0.0, t2 - t1 - self._step_width)
+                for t1, t2 in zip(t_arr[:-1], t_arr[1:])
+            ]
+
+            # MIN_SPEED = 5.0
+            #
+            # def is_safe(s0, s1):
+            #     return v(s0) >= MIN_SPEED and v(s1) >= MIN_SPEED
+            #
+            # v = self._motion_profile.get_velocity_from_position_fn()  # v(s)
+            # t = self._motion_profile.get_time_from_position_fn()  # t(s)
+            # delays = []
+            # for s0 in s_arr[:-1]:
+            #     s1 = s0 + self.motor.step_angle
+            #     if is_safe(s0, s1):
+            #         delay, _ = quad(lambda s_: 1 / v(s_), s0, s1)
+            #     else:
+            #         delay = t(s1) - t(s0)
+            #     delay = max(0.0, delay - self._step_width)
+            #     delays.append(delay)
 
             self._delays = delays
         else:
@@ -455,7 +453,7 @@ class TwoStageMotionProfileRotator(MotionProfileRotator):
     ) -> None:
         """
         Calculates the delays between successive step pulses that drive the 
-        stepper motor from the given motion profile..
+        stepper motor from the given motion profile.
         """
         self.direction = direction
         self.profile = profile
@@ -590,11 +588,11 @@ class PinConfig:
     Attributes
     ----------
     step_pin : int
-        GPIO pin number for STEP signal.
+        GPIO pin for STEP signal.
     dir_pin : int
-        GPIO pin number for DIR signal.
+        GPIO pin for DIR signal.
     en_pin : int | None, optional
-        GPIO pin number for ENABLE signal (active-low). Default is None.
+        GPIO pin for ENABLE signal (active-low). Default is None.
     """
     step_pin: int
     dir_pin: int
@@ -636,11 +634,11 @@ class MicrostepPinConfig:
     Attributes
     ----------
     ms1_pin : int | None, optional
-        GPIO pin number for MS1. Default is None.
+        GPIO pin for MS1. Default is None.
     ms2_pin : int | None, optional
-        GPIO pin number for MS2. Default is None.
+        GPIO pin for MS2. Default is None.
     ms3_pin : int | None, optional
-        GPIO pin number for MS3. Default is None.
+        GPIO pin for MS3. Default is None.
     use_pigpio:
         Indicates to use the `pigpio` library to control the GPIO pins of the
         Raspberry Pi (instead of the default higher-level `gpiozero` library).

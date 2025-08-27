@@ -81,8 +81,7 @@ class MPMCProcess(multiprocessing.Process):
             return
         
         prepared = False
-        msg: str = ""
-        
+
         # Message loop
         while True:
             try:
@@ -181,7 +180,7 @@ class SPMCProcess(multiprocessing.Process):
         {"cmd": "stop_jog"}
         ```
 
-    4.  Command to shutdown the process.
+    4.  Command to shut down the process.
         ```
         {"cmd": "shutdown"}
         ```
@@ -214,7 +213,7 @@ class SPMCProcess(multiprocessing.Process):
         ```
         - Key "message" contains the type of exception and its description.
     
-    5.  If an unknown command is send, the `SPMCProcess` responds with:
+    5.  If an unknown command is sent, the `SPMCProcess` responds with:
         ```
         {"status": "error", "message": f"Unknown command: {cmd}"}
         ```

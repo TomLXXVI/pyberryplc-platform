@@ -1,5 +1,47 @@
+import typing
+import math
+
 import numpy as np
 from scipy.optimize import root_scalar, minimize_scalar
+
+
+Tuple = typing.Tuple
+Union = typing.Union
+
+
+def solve_quadratic_eq(
+    a: float,
+    b: float,
+    c: float, *,
+    dt_floor: float = 1e-12
+) -> Union[Tuple[float, float], float]:
+    """
+    Solves the quadratic equation a * x^2 + b * x + c = 0.
+    Only real roots are supported.
+
+    Raises
+    ------
+    ValueError:
+        If the discriminant is negative, meaning that the equation has two
+        imaginary roots.
+    """
+    if abs(a) < 1e-16:
+        if abs(b) < 1e-16:
+            raise ValueError("No solution possible.")
+        dt = -c / b
+        if not (dt > dt_floor and math.isfinite(dt)):
+            raise ValueError("No solution possible.")
+        return dt
+
+    D = b ** 2 - 4 * a * c
+    if D < 0:
+        raise ValueError("No real solution.")
+    sqrt_D = math.sqrt(D)
+    q = -0.5 * (b + math.copysign(sqrt_D, b))
+    x1 = q / a
+    x2 = c / q if q != 0.0 else float("inf")
+    sol = tuple(sorted([x1, x2]))
+    return typing.cast(tuple[float, float], sol)
 
 
 def find_zero_crossings(f, t_arr, method='brentq', fallback=True, **kwargs):

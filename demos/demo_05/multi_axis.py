@@ -1,4 +1,4 @@
-from pyberryplc.motion.profile_alt import (
+from pyberryplc.motion import (
     RotationDirection,
     SCurvedProfile
 )

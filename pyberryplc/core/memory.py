@@ -124,7 +124,7 @@ class MemoryVariable:
 @dataclass
 class HMISharedData:
     """
-    Dataclass for sharing data between a PLC application and a HMI application.
+    Dataclass for sharing data between a PLC application and an HMI application.
     """
     buttons: dict[str, bool] = field(default_factory=dict)
     switches: dict[str, bool] = field(default_factory=dict)

@@ -1,11 +1,11 @@
-from .point_to_point_trajectory.profile import (
-    MotionProfile, 
-    TrapezoidalProfile, 
-    SCurvedProfile, 
+from .profile import (
+    MotionProfile,
+    TrapezoidalProfile,
+    SCurvedProfile,
     RotationDirection
 )
 
-from .point_to_point_trajectory.trajectory import (
+from .trajectory import (
     Axis,
     XYZSegment,
     PointToPointTrajectory

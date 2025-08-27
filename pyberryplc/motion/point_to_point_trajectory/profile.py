@@ -9,7 +9,7 @@ from scipy.interpolate import interp1d
 
 from pyberryplc.charts import LineChart
 
-from .elementary import cubic as cj, parabolic as ca
+from pyberryplc.motion.elementary import cubic as cj, parabolic as ca
 
 
 class MotionProfile(ABC):
