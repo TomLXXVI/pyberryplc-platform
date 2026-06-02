@@ -1,6 +1,6 @@
 from pyberryplc.core import AbstractPLC, CounterDown, MemoryVariable, EmergencyException
 from pyberryplc.stepper.controller import XYZMotionController, MotionStatus
-from pyberryplc.utils.keyboard_input import KeyInput
+from pyberryplc.utils.keyboard_input import KeyBoardInput
 
 
 class TrajectoryPLC(AbstractPLC):
@@ -9,7 +9,7 @@ class TrajectoryPLC(AbstractPLC):
         super().__init__(logger=logger)
         self.traj_file_path = traj_file_path
 
-        self.key_input = KeyInput()
+        self.key_input = KeyBoardInput()
 
         self.motion_controller = XYZMotionController(self, "motor_config.toml", logger)
         self.motion: MotionStatus | None = None

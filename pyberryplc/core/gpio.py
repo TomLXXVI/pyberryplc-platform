@@ -40,7 +40,7 @@ class DigitalInput(GPIO):
         
     def __init__(
         self, 
-        pin: int,
+        pin: int | str,
         label: str,
         pin_factory: PiFactory | None = None,
         pull_up: bool | None = None,
@@ -101,7 +101,7 @@ class DigitalOutput(GPIO):
     
     def __init__(
         self,
-        pin: int,
+        pin: int | str,
         label: str,
         active_high: bool = True,
         pin_factory: PiFactory | None = None,
@@ -156,7 +156,7 @@ class PWMOutput(GPIO):
 
     def __init__(
         self,
-        pin: int,
+        pin: int | str,
         label: str,
         pin_factory: PiFactory | None = None,
         initial_value: float = 0.0,

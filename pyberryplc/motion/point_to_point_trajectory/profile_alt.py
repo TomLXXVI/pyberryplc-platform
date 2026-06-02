@@ -794,7 +794,7 @@ class SCurvedProfile(MotionProfile):
         dv: float,
         t0: float = 0.0
     ) -> tuple[np.ndarray, np.ndarray]:
-        from .elementary import cubic as cj
+        from ..elementary import cubic as cj
         a_top, dt_acc = self._calc_a_top(dv)
         if dt_acc > 0.0:
             t_arr = np.linspace(t0, t0 + dt_acc, NUM_SAMPLES)

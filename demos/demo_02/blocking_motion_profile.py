@@ -6,7 +6,7 @@ from pyberryplc.stepper import (
     TMC2208UART,
     RotatorType
 )
-from pyberryplc.utils.keyboard_input import KeyInput
+from pyberryplc.utils.keyboard_input import KeyBoardInput
 
 
 def create_motion_profile():
@@ -24,7 +24,7 @@ class SingleStepperPLC(AbstractPLC):
 
     def __init__(self, logger):
         super().__init__(logger=logger)
-        self.key_input = KeyInput()
+        self.key_input = KeyBoardInput()
         self.stepper = self._create_stepper_with_motion_profile()
         self.init_flag = True
         self.completed_flag = False

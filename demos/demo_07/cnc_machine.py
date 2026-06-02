@@ -6,7 +6,7 @@ from pyberryplc.core import (
 )
 from pyberryplc.motion import RotationDirection, TrapezoidalProfile
 from pyberryplc.stepper import XYZMotionController, MotionStatus
-from pyberryplc.utils.keyboard_input import KeyInput
+from pyberryplc.utils.keyboard_input import KeyBoardInput
 
 
 class AutomaticMode:
@@ -204,7 +204,7 @@ class MotionPLC(AbstractPLC):
 
     def __init__(self, logger, traj_filepath: str):
         super().__init__(logger=logger)
-        self.key_input = KeyInput()
+        self.key_input = KeyBoardInput()
 
         self.motion_controller = XYZMotionController(
             master=self,

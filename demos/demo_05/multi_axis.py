@@ -9,7 +9,7 @@ from pyberryplc.stepper import (
     RotatorType
 )
 from pyberryplc.core import AbstractPLC
-from pyberryplc.utils.keyboard_input import KeyInput
+from pyberryplc.utils.keyboard_input import KeyBoardInput
 
 
 def create_motion_profile():
@@ -147,7 +147,7 @@ class MultiAxisPLC(AbstractPLC):
 
     def __init__(self, logger):
         super().__init__(logger=logger)
-        self.key_input = KeyInput()
+        self.key_input = KeyBoardInput()
 
         self.stepper_x = create_stepper_x(logger)
         self.stepper_y = create_stepper_y(logger)

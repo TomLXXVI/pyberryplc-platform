@@ -16,7 +16,7 @@ class MicrosecondFormatter(logging.Formatter):
 
 def init_logger(
     name: str = "", 
-    log_file: str = "logs/plc.log",
+    log_file: str | None = "logs/plc.log",
     level: int = logging.INFO,
     console: bool = True
 ) -> logging.Logger:
@@ -27,14 +27,16 @@ def init_logger(
     ----------
     name : str
         Name of the logger (empty string refers to the root logger).
-    log_file : str
+    log_file : str, optional
         Path to the log file. Parent directories will be created if needed.
+        If None, no log file is created.
     level : int
         Logging level (e.g., logging.INFO or logging.DEBUG).
     console : bool
         If True, log to sys.stdout. If False, only log to file.
     """
-    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    if log_file is not None:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -46,15 +48,19 @@ def init_logger(
             datefmt="%Y-%m-%d %H:%M:%S.%f"
         )
 
-        file_handler = TimedRotatingFileHandler(
-            log_file, when="midnight", backupCount=7, encoding="utf-8"
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        
+        if log_file is not None:
+            file_handler = TimedRotatingFileHandler(
+                log_file, when="midnight", backupCount=7, encoding="utf-8"
+            )
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
         if console:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
+
+        if log_file is None and not console:
+            raise ValueError("Either log_file or console must be set.")
 
     return logger

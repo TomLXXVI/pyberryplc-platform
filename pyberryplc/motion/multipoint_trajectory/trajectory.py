@@ -198,7 +198,7 @@ class Axis:
 
     def _get_angular_displacement(self) -> TAngularDisplacement:
         delta = self.angles[-1] - self.angles[0]
-        magn = abs(delta * self.pitch * 360.0)
+        magn = abs(delta)
         rdir = self.rdir_ref if delta >= 0.0 else ~self.rdir_ref
         return magn, rdir
 

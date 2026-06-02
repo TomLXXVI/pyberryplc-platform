@@ -1,3 +1,4 @@
+from typing import Any, cast
 from abc import ABC, abstractmethod
 import time
 import logging
@@ -25,8 +26,9 @@ class AbstractRemoteDeviceClient(ABC):
         pass
 
     @abstractmethod
-    def wait_for_done(self) -> None:
-        """Waits for a response from the remote device indicating completion."""
+    def wait_for_response(self) -> dict[str, Any]:
+        """Waits for a response from the remote device indicating completion of
+        the command."""
         pass
 
     @abstractmethod
@@ -74,14 +76,14 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         retry_delay : float
             Delay in seconds between retry attempts.
         """
-        self.host: str = host
-        self.port: int = port
-        self.logger: logging.Logger | None = logger
-        self.timeout: float = timeout
-        self.max_retries: int = max_retries
-        self.retry_delay: float = retry_delay
-        self.socket:socket.socket | None = None
-        self.stream: socket.SocketIO | None = None
+        self.host = host
+        self.port = port
+        self.logger = logger
+        self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.socket = None
+        self.stream = None
 
     def connect(self) -> None:
         """
@@ -90,10 +92,10 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         attempt = 0
         while attempt < self.max_retries:
             try:
-                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socket.settimeout(self.timeout)
                 self.socket.connect((self.host, self.port))
-                self.stream = self.socket.makefile('r')  
+                self.stream: socket.SocketIO = self.socket.makefile('r')
                 # File-like object that can be read. Used for receiving the
                 # responses from the remote device.
                 self.socket.settimeout(None)
@@ -112,13 +114,13 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
         msg = json.dumps(command_dict) + "\n"  # `\n` indicates the end of a message.
         self.socket.sendall(msg.encode())  # Convert JSON string to bytes and send it to the remote device.
 
-    def wait_for_done(self) -> None:
+    def wait_for_response(self) -> dict[str, Any]:
         """
         Waits for the response from the remote device after an execution command
         was sent. 
 
-        Expects a JSON message with 'status': 'done' to confirm completion.
-        Raises an error if 'status': 'error' or timeout occurs.
+        Expects a JSON message with 'status' to confirm completion of the
+        command. Raises an error if 'status': 'error' or timeout occurs.
         """
         start_time = time.time()
         while True:
@@ -133,11 +135,11 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
                     "Connection to remote device was closed unexpectedly."
                 )
             # Convert the text line to a dictionary.
-            response = json.loads(line) 
-            if response.get("status") == "done":
-                return
-            elif response.get("status") == "error":
+            response = json.loads(line)
+            self._log(f"Received response from remote device: {response}")
+            if response.get("status") == "error":
                 raise RuntimeError(f"Error from remote device: {response.get('message')}")
+            return response
 
     def shutdown(self) -> None:
         """
@@ -213,14 +215,14 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
         self.baudrate = baudrate
         self.timeout = timeout
         self.logger: logging.Logger | None = logger
-        self.ser: serial.Serial | None = None
+        self.ser = None
 
     def connect(self) -> None:
         """
         Opens the serial port connection.
         """
         try:
-            self.ser = serial.Serial(self.port, self.baudrate, timeout=1)
+            self.ser: serial.Serial = serial.Serial(self.port, self.baudrate, timeout=1)
             self._log(f"Connected to serial device at {self.port} (baudrate {self.baudrate})")
         except Exception as e:
             raise ConnectionError(f"Failed to open serial port: {e}")
@@ -232,7 +234,7 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
         msg = json.dumps(command_dict) + "\n"
         self.ser.write(msg.encode())
 
-    def wait_for_done(self) -> None:
+    def wait_for_response(self) -> dict[str, Any]:  # type: ignore
         """
         Waits for a response from the serial device.
 
@@ -246,11 +248,10 @@ class SerialRemoteDeviceClient(AbstractRemoteDeviceClient):
             line = self.ser.readline().decode().strip()
             if not line:
                 continue
-            response = json.loads(line)
-            if response.get("status") == "done":
-                return
+            response = cast(dict[str, Any], json.loads(line))
             if response.get("status") == "error":
                 raise RuntimeError(f"Error from serial device: {response.get('message')}")
+            return response
 
     def shutdown(self) -> None:
         """

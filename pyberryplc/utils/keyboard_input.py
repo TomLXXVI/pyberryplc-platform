@@ -10,14 +10,14 @@ class KeyInput:
 
     def update(self) -> None:
         """
-        Update the remembered key states from the previous scan.
+        Update the key states in memory from the keyboard.
         """
         for key in self.keys:
             self.keys[key].update(keyboard.is_pressed(key))
 
     def is_pressed(self, key: str) -> bool:
         """
-        Check if a key is currently pressed.
+        Check if a key is pressed in the current PLC scan.
         """
         if key not in self.keys:
             self.keys[key] = MemoryVariable(keyboard.is_pressed(key), False)

@@ -18,7 +18,7 @@ import logging
 from pyberryplc.core import AbstractPLC, SharedMemoryBlock
 from pyberryplc.core.timers import TimerOnDelay
 from pyberryplc.core.counters import CounterUp
-from pyberryplc.utils.remote_interface import TCPRemoteDeviceClient
+from pyberryplc.utils.remote_interface_client_old import TCPRemoteDeviceClient
 
 
 class LoadingStation(AbstractPLC):
@@ -33,7 +33,7 @@ class LoadingStation(AbstractPLC):
         
         # Remote stepper driver
         self.stepper_driver = TCPRemoteDeviceClient(logger=self.logger)
-                        
+
         # SFC Step markers
         self.X0 = self.add_marker('X0')
         

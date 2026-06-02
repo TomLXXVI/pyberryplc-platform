@@ -265,7 +265,7 @@ class AbstractPLC(ABC):
         pin: str | int,
         label: str,
         active_high: bool = True,
-        init_value: bool = 0
+        init_value: bool = 0  # type: ignore
     ) -> tuple[MemoryVariable, MemoryVariable]:
         """Adds a digital output to the PLC application.
         
@@ -394,7 +394,7 @@ class AbstractPLC(ABC):
         di = self._inputs.get(label)
         if di:
             value = di.read()
-            return value
+            return bool(value)
         else:
             raise ConfigurationError(f"unknown digital input `{label}`")
 
@@ -428,43 +428,44 @@ class AbstractPLC(ABC):
         """If a `HMISharedData` object is passed to `AbstractPLC.__init__(), 
         creates separate HMI input and output registers.
         """
-        self.hmi_input_register = {
-            name: MemoryVariable(
-                curr_state=init_value,
-                prev_state=init_value
-            )
-            for name, init_value in self.hmi_data.buttons.items()
-        }
-        self.hmi_input_register.update({
-            name: MemoryVariable(
-                curr_state=init_value,
-                prev_state=init_value
-            )
-            for name, init_value in self.hmi_data.switches.items()
-        })
-        self.hmi_input_register.update({
-            name: MemoryVariable(
-                curr_state=init_value,
-                prev_state=init_value,
-                single_bit=False
-            )
-            for name, init_value in self.hmi_data.analog_inputs.items()
-        })
-        self.hmi_output_register = {
-            name: MemoryVariable(
-                curr_state=init_value,
-                prev_state=init_value
-            )
-            for name, init_value in self.hmi_data.digital_outputs.items()
-        }
-        self.hmi_output_register.update({
-            name: MemoryVariable(
-                curr_state=init_value,
-                prev_state=init_value,
-                single_bit=False
-            )
-            for name, init_value in self.hmi_data.analog_outputs.items()
-        })
+        if self.hmi_data is not None:
+            self.hmi_input_register = {
+                name: MemoryVariable(
+                    curr_state=init_value,
+                    prev_state=init_value
+                )
+                for name, init_value in self.hmi_data.buttons.items()
+            }
+            self.hmi_input_register.update({
+                name: MemoryVariable(
+                    curr_state=init_value,
+                    prev_state=init_value
+                )
+                for name, init_value in self.hmi_data.switches.items()
+            })
+            self.hmi_input_register.update({
+                name: MemoryVariable(
+                    curr_state=init_value,
+                    prev_state=init_value,
+                    single_bit=False
+                )
+                for name, init_value in self.hmi_data.analog_inputs.items()
+            })
+            self.hmi_output_register = {
+                name: MemoryVariable(
+                    curr_state=init_value,
+                    prev_state=init_value
+                )
+                for name, init_value in self.hmi_data.digital_outputs.items()
+            }
+            self.hmi_output_register.update({
+                name: MemoryVariable(
+                    curr_state=init_value,
+                    prev_state=init_value,
+                    single_bit=False
+                )
+                for name, init_value in self.hmi_data.analog_outputs.items()
+            })
     
     def _read_inputs(self) -> None:
         """Reads all physical inputs (defined in the PLC application) and writes 
@@ -490,18 +491,19 @@ class AbstractPLC(ABC):
         """Reads HMI inputs from `self.hmi_data` and updates the HMI input
         register.
         """
-        for name, value in self.hmi_data.buttons.items():
-            self.hmi_input_register[name].update(value)
-            # if an HMI button state has been read into the HMI register of the
-            # PLC always reset this state in `self.hmi_data` (i.e. means that
-            # a button press in the HMI is valid for only one PLC scan cycle).
-            self.hmi_data.buttons[name] = False
+        if self.hmi_data is not None:
+            for name, value in self.hmi_data.buttons.items():
+                self.hmi_input_register[name].update(value)
+                # if an HMI button state has been read into the HMI register of the
+                # PLC always reset this state in `self.hmi_data` (i.e. means that
+                # a button press in the HMI is valid for only one PLC scan cycle).
+                self.hmi_data.buttons[name] = False
 
-        for name, value in self.hmi_data.switches.items():
-            self.hmi_input_register[name].update(value)
+            for name, value in self.hmi_data.switches.items():
+                self.hmi_input_register[name].update(value)
 
-        for name, value in self.hmi_data.analog_inputs.items():
-            self.hmi_input_register[name].update(value)
+            for name, value in self.hmi_data.analog_inputs.items():
+                self.hmi_input_register[name].update(value)
     
     def _write_outputs(self) -> None:
         """Writes all current states in the PLC output register to the 
@@ -527,11 +529,12 @@ class AbstractPLC(ABC):
         """Writes the state of the HMI outputs in the PLC HMI output register
         to `self.hmi_data`.
         """
-        for name, mem_var in self.hmi_output_register.items():
-            if mem_var.single_bit:
-                self.hmi_data.digital_outputs[name] = mem_var.curr_state
-            else:
-                self.hmi_data.analog_outputs[name] = mem_var.curr_state
+        if self.hmi_data is not None:
+            for name, mem_var in self.hmi_output_register.items():
+                if mem_var.single_bit:
+                    self.hmi_data.digital_outputs[name] = mem_var.curr_state
+                else:
+                    self.hmi_data.analog_outputs[name] = mem_var.curr_state
     
     def _update_previous_states(self):
         """At the start of each new PLC scan cycle, the values in the "current 
