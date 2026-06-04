@@ -10,7 +10,8 @@ from gpiozero.pins.pigpio import PiFactory
 
 from pyberryplc.utils.email_notification import EmailNotification
 
-from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
+from .gpio import GPIO
+from .io_backend import BaseIOBackend, HardwareBackend
 from .memory import MemoryVariable, HMISharedData
 from .exceptions import *
 
@@ -34,6 +35,7 @@ class AbstractPLC(ABC):
         hmi_data: HMISharedData | None = None,
         logger: logging.Logger | None = None,
         pin_factory: PiFactory | None = None,
+        io_backend: BaseIOBackend | None = None,
         eml_notification: EmailNotification | None = None
     ) -> None:
         """Creates an `AbstractPLC` instance.
@@ -56,6 +58,10 @@ class AbstractPLC(ABC):
             the default pin factory is used, which is `PiGPIOFactory`. This
             requires that `pigpio` is installed on the Raspberry Pi, and that
             the `pigpiod` daemon is running in the background.
+        io_backend:
+            Backend responsible for creating the concrete I/O channels. If
+            `None`, a `HardwareBackend` is used, preserving the current GPIO
+            behavior.
         eml_notification: optional
             Instance of class `EmailNotification` (see module
             email_notification.py). Allows to send email messages if certain
@@ -70,6 +76,7 @@ class AbstractPLC(ABC):
         self.scan_time = scan_time
         self.hmi_data = hmi_data
         self.pin_factory = pin_factory
+        self.io_backend = io_backend if io_backend else HardwareBackend(pin_factory)
         self._exit: bool = False
         
         # Attaches an e-mail notification service (can be None).
@@ -242,17 +249,13 @@ class AbstractPLC(ABC):
         The memory variable of the digital input in the input memory registry.
         """
         if NC_contact:
-            active_state = False
             init_value = 1
         else:
-            active_state = True
             init_value = 0
-        self._inputs[label] = DigitalInput(
-            pin, 
-            label, 
-            self.pin_factory, 
-            pull_up=None, 
-            active_state=active_state
+        self._inputs[label] = self.io_backend.create_digital_input(
+            pin,
+            label,
+            NC_contact,
         )
         self.input_register[label] = MemoryVariable(
             curr_state=init_value,
@@ -289,12 +292,11 @@ class AbstractPLC(ABC):
         The memory variable of the digital output in the output memory registry, 
         and the memory variable of its status in the input memory registry. 
         """
-        self._outputs[label] = DigitalOutput(
-            pin, 
+        self._outputs[label] = self.io_backend.create_digital_output(
+            pin,
             label,
             active_high,
-            self.pin_factory,
-            init_value
+            init_value,
         )
         self.output_register[label] = MemoryVariable(
             curr_state=init_value,
@@ -352,9 +354,9 @@ class AbstractPLC(ABC):
         The memory variable of the PWM output in the output memory registry, 
         and the memory variable of its status in the input memory registry.
         """
-        self._outputs[label] = PWMOutput(
-            pin, label, self.pin_factory, init_value, frame_width, 
-            min_pulse_width, max_pulse_width, min_value, max_value
+        self._outputs[label] = self.io_backend.create_pwm_output(
+            pin, label, init_value, frame_width, min_pulse_width,
+            max_pulse_width, min_value, max_value
         )
         self.output_register[label] = MemoryVariable(
             curr_state=init_value,
