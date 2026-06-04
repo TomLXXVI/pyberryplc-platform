@@ -137,7 +137,8 @@ class TCPRemoteDeviceClient(AbstractRemoteDeviceClient):
             # Convert the text line to a dictionary.
             response = json.loads(line)
             if response.get("status") == "error":
-                raise RuntimeError(f"Error from remote device: {response.get('message')}")
+                # raise RuntimeError(f"Error from remote device: {response.get('message')}")
+                raise RuntimeError(f"{response.get('message')}")
             return response
 
     def shutdown(self) -> None:

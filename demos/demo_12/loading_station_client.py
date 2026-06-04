@@ -7,25 +7,32 @@ from remote_loading_station import Command, Status
 
 class LoadingStation(TCPRemoteDeviceClient):
 
-    def handle_response(self) -> tuple[str, str]:
+    def get_response(self) -> tuple[str, str]:
         try:
             response = self.wait_for_response()
         except Exception as e:
-            message = f"Error while waiting for response: {e}"
+            # message = f"Error while waiting for response: {e}"
+            message = str(e)
             return Status.ERROR, message
         else:
             status = str(response.get("status"))
             message = str(response.get("message"))
             return status, message
 
-    def get_status(self, step_id: str) -> None:
+    def send_command(self, command: Command) -> None:
         try:
-            self.send_command({"command": Command.GET_STATUS, "step": step_id})
+            super().send_command({"command": command})
         except Exception as e:
             self._log(f"Sending of command failed: {e}", level=logging.ERROR)
 
-    def start(self) -> None:
-        try:
-            self.send_command({"command": Command.START_LOADING})
-        except Exception as e:
-            self._log(f"Sending of command failed: {e}", level=logging.ERROR)
+    def check_operational_state(self) -> None:
+        self.send_command(Command.CHECK_OPERATIONAL_STATE)
+
+    def start_loading(self) -> None:
+        self.send_command(Command.START_LOADING)
+
+    def get_loading_progress(self) -> None:
+        self.send_command(Command.GET_LOADING_PROGRESS)
+
+    def shutdown(self) -> None:
+        self.send_command(Command.SHUTDOWN)

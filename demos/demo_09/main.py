@@ -40,13 +40,13 @@ class MainPLC(AbstractPLC):
         self.loadingstation = LoadingStation(
             init_logger("LOADING-STATION"),
             self.datablock)
-        self.loadingstation_thread: threading.Thread | None = None
+        self.loadingstation_thread = None
         
         self.multi_machine = MultiOperationMachine(
             init_logger("multi-operation"),
             self.datablock
         )
-        self.multistation_thread: threading.Thread | None = None
+        self.multistation_thread = None
         
         # Create step markers for the program sequence.
         self.X0 = self.add_marker("X0")
@@ -59,11 +59,11 @@ class MainPLC(AbstractPLC):
             self.init_flag = False
             
             # Start PLC scan loop of loading station in a thread.
-            self.loadingstation_thread = threading.Thread(target=self.loadingstation.run)
+            self.loadingstation_thread: threading.Thread = threading.Thread(target=self.loadingstation.run)
             self.loadingstation_thread.start()
             
             # Start PLC scan loop of multi-operation machine in a thread.
-            self.multistation_thread = threading.Thread(target=self.multi_machine.run)
+            self.multistation_thread: threading.Thread = threading.Thread(target=self.multi_machine.run)
             self.multistation_thread.start()
             
             # Note: we need threads otherwise the PLC scan loop of the loading

@@ -1,8 +1,10 @@
+from typing import Any
 import logging
 import threading
 import time
 from enum import StrEnum
-from typing import Any
+import random
+
 
 from pyberryplc.utils.remote_interface_server import TCPRemoteDeviceServer
 from pyberryplc.core import TimerOffDelay
@@ -14,11 +16,13 @@ class Status(StrEnum):
     BUSY = "busy"
     DONE = "done"
     ERROR = "error"
+    TIMEOUT = "timeout"
 
 
 class Command(StrEnum):
-    GET_STATUS = "get_status"
+    CHECK_OPERATIONAL_STATE = "check_operational_state"
     START_LOADING = "start_loading"
+    GET_LOADING_PROGRESS = "get_loading_progress"
     SHUTDOWN = "shutdown"
 
 
@@ -31,58 +35,86 @@ class LoadingStation(TCPRemoteDeviceServer):
         port: int = 65432,
     ) -> None:
         super().__init__(logger, host, port)
-        self._status = Status.OFF
         self.timer_loading = TimerOffDelay(10)
+        self.status = Status.OFF
 
     def initialize(self) -> None:
-        self._status = Status.READY
+        pass
 
     def handle_command(self, command: dict[str, str]) -> dict[str, Any]:
         command_ = command.get("command")
-        step_id = command.get("step", "")
         match command_:
-            case Command.GET_STATUS:
-                return self._get_status(step_id)
+            case Command.CHECK_OPERATIONAL_STATE:
+                return self._check_operational_state()
             case Command.START_LOADING:
-                return self._start_loading_cycle()
+                return self._start_loading()
+            case Command.GET_LOADING_PROGRESS:
+                return self._get_loading_progress()
             case Command.SHUTDOWN:
                 return self._shutdown()
             case _:
                 return {"status": Status.ERROR, "message": "Unknown command."}
 
-    def _get_status(self, step_id: str) -> dict[str, Any]:
-        match step_id:
-            case "S11":
-                self._status = Status.READY
-                response = {"status": self._status, "message": "Ready to go."}
-                return response
-            case "S13":
-                if self._status == Status.BUSY:
-                    message = "Still busy."
-                elif self._status == Status.DONE:
-                    message = "Done loading."
-                else:
-                    message = "I don't know what I'm doing."
-                response = {"status": self._status, "message": message}
-                return response
-            case _:
-                self._status = Status.ERROR
-                response = {"status": self._status, "message": "Unknown step."}
-                return response
+    def _response(self, message: str) -> dict[str, Any]:
+        return {"status": self.status, "message": message}
+
+    def _check_operational_state(self) -> dict[str, Any]:
+        self.status = random.choice([Status.READY, Status.ERROR])
+        if self.status == Status.READY:
+            return self._response("Ready to go.")
+        else:
+            return self._response("Operational trouble.")
 
     def _run_loading_cycle(self) -> None:
-        while self.timer_loading.running:
-            time.sleep(0.01)
-        self.timer_loading.reset()
-        self._status = Status.DONE
+        timeout_secs = self.timer_loading.dt
+        cycle_duration = random.uniform(2.0, 12.0)
+        error_after = (
+            random.uniform(0.5, timeout_secs)
+            if random.random() < 0.2
+            else None
+        )
 
-    def _start_loading_cycle(self) -> dict[str, Any]:
-        self._status = Status.BUSY
+        t_start = time.perf_counter()
+        self.status = Status.BUSY
+
+        while self.timer_loading.running:
+            elapsed = time.perf_counter() - t_start
+
+            if error_after is not None and elapsed >= error_after:
+                self.status = Status.ERROR
+                self.timer_loading.reset()
+                return
+
+            if elapsed >= cycle_duration:
+                self.status = Status.DONE
+                self.timer_loading.reset()
+                return
+
+            time.sleep(0.1)
+
+        self.status = Status.TIMEOUT
+        self.timer_loading.reset()
+
+    def _start_loading(self) -> dict[str, Any]:
+        self.status = Status.BUSY
         threading.Thread(target=self._run_loading_cycle, daemon=True).start()
-        return {"status": self._status, "message": "Loading cycle started."}
+        return self._response("Loading cycle started.")
+
+    def _get_loading_progress(self) -> dict[str, Any]:
+        match self.status:
+            case Status.BUSY:
+                return self._response("Still busy with this loading cycle.")
+            case Status.DONE:
+                return self._response("Loading cycle done.")
+            case Status.TIMEOUT:
+                return self._response("Loading cycle timeout.")
+            case Status.ERROR:
+                return self._response("Something went wrong during loading.")
+            case _:
+                return self._response("Loading cycle progression unknown.")
 
     def _shutdown(self) -> dict[str, Any]:
-        return {"status": self._status, "message": "Shutting down."}
+        return {"status": self.status, "message": "Shutting down."}
 
 
 def main():
@@ -95,6 +127,7 @@ def main():
     )
 
     loading_station = LoadingStation(logger, "localhost", 65432)
+    loading_station.initialize()
     loading_station.run()
 
 

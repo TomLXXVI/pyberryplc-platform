@@ -45,7 +45,6 @@ class TCPRemoteDeviceServer(ABC):
         ...
 
     def run(self) -> None:
-        self.initialize()
         self._message_loop()
 
     def notify_master(self, message_dict: dict) -> None:

@@ -1,6 +1,12 @@
+from typing import Callable
+
 import logging
 
-from pyberryplc.core import AbstractPLC, MemoryVariable, ToggleSwitch, EmergencyException
+from pyberryplc.core import (
+    AbstractPLC, MemoryVariable, ToggleSwitch, SharedMemoryBlock,
+    TimerOnDelay
+)
+
 from pyberryplc.utils.keyboard_input import KeyInput
 
 from loading_station_client import LoadingStation
@@ -9,13 +15,34 @@ from remote_loading_station import Status
 
 class LoadingStationPLC(AbstractPLC):
 
-    def __init__(self, logger: logging.Logger):
+    def __init__(
+        self,
+        logger: logging.Logger,
+        db0: SharedMemoryBlock,  # shared with main plc
+        db1: SharedMemoryBlock,  # shared with infeed conveyor
+    ) -> None:
         super().__init__(logger=logger)
+
         self.key_input = KeyInput()
 
         self.init_flag: bool = True
 
-        # Steps
+        # Shared memory blocks
+        self.db0 = db0
+        self.db1 = db1
+
+        # Variables
+        self._create_variables()
+
+        # Remote device clients
+        self.loading_station = LoadingStation(logger=self.logger)
+
+        # Steps, Transitions & Actions
+        self._create_steps()
+        self.T = self._create_transitions()
+        self.A = self._create_actions()
+
+    def _create_steps(self) -> None:
         self.S10 = self.add_marker("S10")
         self.S11 = self.add_marker("S11")
         self.S12 = self.add_marker("S12")
@@ -24,34 +51,6 @@ class LoadingStationPLC(AbstractPLC):
         self.S15 = self.add_marker("S15")
         self.S16 = self.add_marker("S16")
         self.S17 = self.add_marker("S17")
-
-        # Inputs
-        self.ProductionEnable: ToggleSwitch = self._create_key_switch("p")
-        self.TrayToLoadAvailable: MemoryVariable = self._create_key_button("t")
-
-        self.LoadingStationReady: bool = False
-        self.LoadingStationBusy: bool = False
-        self.LoadingStationBlocked: bool = False
-        self.LoadingStationFaultActive: bool = False
-        self.LoadingCycleStarted: bool = False
-        self.LoadingCycleTimeout: bool = False
-
-        self.TrayLoaded: bool = False
-        self.TrayTransferRegistered: bool = False
-
-        self.ConveyorReadyToAccept: bool = False
-        self.ConveyorAcceptedTray: bool = False
-        self.ConveyorAcceptTimeout: bool = False
-
-        self.FaultCleared: bool = False
-        self.ResetRequest: bool = False
-
-        # Outputs
-        self.StartLoadingCycle: bool = False
-        self.RequestConveyorAccept: bool = False
-
-        # Remote device clients
-        self.loading_station = LoadingStation(logger=self.logger)
 
     def _create_key_switch(self, key: str) -> ToggleSwitch:
         self.key_input.keys[key] = MemoryVariable()
@@ -62,145 +61,223 @@ class LoadingStationPLC(AbstractPLC):
         self.key_input.keys[key] = MemoryVariable()
         return self.key_input.keys[key]
 
-    def _T10_11(self) -> bool:
-        return (
-            self.ProductionEnable.active
-            and self.TrayToLoadAvailable.active
-            and not self.LoadingStationFaultActive
-        )
+    def _create_variables(self) -> None:
+        self.ProductionEnable = self.db0.data["ProductionEnable"]
 
-    def _T11_12(self) -> bool:
-        return (
-            self.LoadingStationReady
-            and self.ConveyorReadyToAccept
-            and not self.LoadingStationFaultActive
-        )
+        self.TrayToLoadAvailable = self._create_key_button("t")
 
-    def _T11_16(self) -> bool:
-        return (
-            not self.ConveyorReadyToAccept
-            and not self.LoadingStationFaultActive
-        )
+        self.LoadingStationReady = MemoryVariable()
+        self.LoadingStationBusy = MemoryVariable()
+        self.LoadingStationBlocked = MemoryVariable()
+        self.LoadingStationFaultActive = MemoryVariable()
+        self.LoadingCycleStarted = MemoryVariable()
+        self.LoadingCycleTimeout = MemoryVariable()
+        self.TrayLoaded = MemoryVariable()
+        self.TrayTransferRegistered = MemoryVariable()
 
-    def _T11_17(self) -> bool:
-        return (
-            self.LoadingStationFaultActive
-            or not self.LoadingStationReady
-        )
+        self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
+        self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
+        self.ConveyorAcceptedTray = self.db1.data["ConveyorAcceptedTray"]
 
-    def _T12_13(self) -> bool:
-        return self.LoadingCycleStarted
+        self.ConveyorAcceptTimeout = MemoryVariable()
+        self.TimerConveyorAccept = TimerOnDelay(2.0)
 
-    def _T13_14(self) -> bool:
-        return self.TrayLoaded
+        self.FaultCleared = MemoryVariable()
+        self.ResetRequest: MemoryVariable = self._create_key_button("r")
 
-    def _T13_17(self) -> bool:
-        return (
-            self.LoadingCycleTimeout
-            or self.LoadingStationFaultActive
-        )
+    def _create_transitions(self) -> dict[str, Callable[[], bool]]:
 
-    def _T14_15(self) -> bool:
-        return self.ConveyorAcceptedTray
+        def T10_11() -> bool:
+            return (
+                self.ProductionEnable.active
+                and not self.LoadingStationFaultActive.active
+            )
 
-    def _T14_16(self) -> bool:
-        return (
-            not self.ConveyorReadyToAccept
-            and not self.ConveyorAcceptedTray
-        )
+        def T11_12() -> bool:
+            return (
+                self.LoadingStationReady.active
+                and self.ConveyorReadyToAccept.active
+                and self.TrayToLoadAvailable.active
+                and not self.LoadingStationFaultActive.active
+            )
 
-    def _T14_17(self) -> bool:
-        return (
-            self.ConveyorAcceptTimeout
-            or self.LoadingStationFaultActive
-        )
+        def T11_16() -> bool:
+            return (
+                not self.ConveyorReadyToAccept.active
+                and not self.LoadingStationFaultActive.active
+            )
 
-    def _T15_10(self) -> bool:
-        return self.TrayTransferRegistered
+        def T11_17() -> bool:
+            return (
+                self.LoadingStationFaultActive.active
+                or not self.LoadingStationReady.active
+            )
 
-    def _T16_11(self) -> bool:
-        return self.ConveyorReadyToAccept and self.ProductionEnable.active
+        def T12_13() -> bool:
+            return self.LoadingCycleStarted.active
 
-    def _T16_10(self) -> bool:
-        return not self.ProductionEnable.active
+        def T13_14() -> bool:
+            return self.TrayLoaded.active
 
-    def _T17_10(self) -> bool:
-        return self.FaultCleared and self.ResetRequest
+        def T13_17() -> bool:
+            return (
+                self.LoadingCycleTimeout.active
+                or self.LoadingStationFaultActive.active
+            )
 
-    def reset(self) -> None:
-        self.LoadingStationReady = False
-        self.LoadingStationFaultActive = False
-        self.LoadingCycleStarted = False
-        self.TrayLoaded = False
-        self.TrayTransferRegistered = False
-        self.ConveyorReadyToAccept = False
-        self.ConveyorAcceptedTray = False
+        def T14_15() -> bool:
+            return self.ConveyorAcceptedTray.active
 
-    def check_permissives(self, step: MemoryVariable, step_id: str) -> None:
-        self._check_loading_station(step, step_id)
-        self._check_conveyor()
+        def T14_16() -> bool:
+            return (
+                not self.ConveyorReadyToAccept.active
+                and not self.ConveyorAcceptedTray.active
+            )
 
-    def _check_loading_station(self, step: MemoryVariable, step_id: str) -> None:
-        if step.rising_edge:
-            self.logger.info("Check loading station status.")
-            self.loading_station.get_status(step_id)
+        def T14_17() -> bool:
+            return (
+                self.ConveyorAcceptTimeout.active
+                or self.LoadingStationFaultActive.active
+            )
 
-        status, message = self.loading_station.handle_response()
-        match status:
-            case Status.READY:
-                self.LoadingStationReady = True
-                self.logger.info(f"Loading station says: {message}")
-            case Status.ERROR:
-                self.LoadingStationFaultActive = True
-                self.logger.error(f"Error while waiting for loading station: {message}")
+        def T15_10() -> bool:
+            return self.TrayTransferRegistered.active
 
-    def _check_conveyor(self) -> None:
-        self.ConveyorReadyToAccept = True
+        def T16_11() -> bool:
+            return (
+                self.ConveyorReadyToAccept.active
+                and self.ProductionEnable.active
+            )
 
-    def start_loading_cycle(self, step: MemoryVariable) -> None:
-        if step.rising_edge:
-            self.logger.info("Start loading cycle.")
-            self.loading_station.start()
+        def T16_10() -> bool:
+            return not self.ProductionEnable.active
 
-        status, message = self.loading_station.handle_response()
-        match status:
-            case Status.BUSY:
-                self.LoadingCycleStarted = True
-                self.logger.info(f"Loading station says: {message}")
+        def T17_10() -> bool:
+            return self.FaultCleared.active and self.ResetRequest.active
 
-    def wait_loading_cycle_finish(self, step: MemoryVariable, step_id: str) -> None:
-        if step.rising_edge:
-            self.logger.info("Wait for loading cycle to finish.")
+        return {
+            "T10_11": T10_11,
+            "T11_12": T11_12,
+            "T11_16": T11_16,
+            "T11_17": T11_17,
+            "T12_13": T12_13,
+            "T13_14": T13_14,
+            "T13_17": T13_17,
+            "T14_15": T14_15,
+            "T14_16": T14_16,
+            "T14_17": T14_17,
+            "T15_10": T15_10,
+            "T16_10": T16_10,
+            "T16_11": T16_11,
+            "T17_10": T17_10,
+        }
 
-        self.loading_station.get_status(step_id)
+    def _create_actions(self) -> dict[str, Callable]:
 
-        status, message = self.loading_station.handle_response()
-        match status:
-            case Status.DONE:
-                self.TrayLoaded = True
-                self.logger.info(f"Loading station says: {message}")
-            case Status.ERROR:
-                self.LoadingStationFaultActive = True
-                self.logger.error(f"Error while waiting for loading station: {message}")
+        def reset(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S10: Idle")
 
-    def offer_to_conveyor(self, step: MemoryVariable) -> None:
-        if step.rising_edge:
-            self.logger.info("Offer tray to conveyor.")
-        self.ConveyorAcceptedTray = True
+            # Reset internal variables at the start of a new scan cycle.
+            self.LoadingStationReady.update(False)
+            self.LoadingCycleStarted.update(False)
+            self.LoadingStationFaultActive.update(False)
+            self.LoadingCycleTimeout.update(False)
+            self.TrayLoaded.update(False)
+            self.TrayTransferRegistered.update(False)
+            self.FaultCleared.update(False)
 
-    def register_tray_status(self, step: MemoryVariable) -> None:
-        if step.rising_edge:
-            self.logger.info("Register tray to MES.")
-        self.TrayTransferRegistered = True
+        def check_permissives(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S11: CheckPermissives")
 
-    def block_station(self, step: MemoryVariable) -> None:
-        if step.rising_edge:
-            self.logger.info("Block station.")
+            _check_loading_station(step)
+            _check_conveyor(step)
 
-    def handle_fault(self, step: MemoryVariable) -> None:
-        if step.rising_edge:
-            self.logger.info("Fault detected.")
-        raise EmergencyException
+        def _check_loading_station(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S11: Check operational state of loading station")
+
+                self.loading_station.check_operational_state()
+
+            status, message = self.loading_station.get_response()
+            match status:
+                case Status.READY:
+                    self.LoadingStationReady.update(True)
+                    self.logger.info(f"Loading station says: {message}")
+                case Status.ERROR:
+                    self.LoadingStationFaultActive.update(True)
+                    self.logger.error(f"Loading station says: {message}")
+
+        def _check_conveyor(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S11: Check operational state of conveyor")
+
+            self.ConveyorReadyToAccept.update(True)
+
+        def load_tray(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S12: LoadTray")
+
+                self.loading_station.start_loading()
+                self.LoadingCycleStarted.update(True)
+
+            status, message = self.loading_station.get_response()
+            match status:
+                case Status.BUSY:
+                    self.logger.info(f"Loading station says: {message}")
+
+        def wait_loaded(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S13: WaitLoaded")
+
+            self.loading_station.get_loading_progress()
+
+            status, message = self.loading_station.get_response()
+            match status:
+                case Status.DONE:
+                    self.TrayLoaded.update(True)
+                    self.logger.info(f"Loading station says: {message}")
+                case Status.ERROR:
+                    self.LoadingStationFaultActive.update(True)
+                    self.logger.error(f"Loading station says: {message}")
+                case Status.TIMEOUT:
+                    self.LoadingCycleTimeout.update(True)
+                    self.logger.info(f"Loading station says: {message}")
+
+        def offer_to_conveyor(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S14: OfferToConveyor")
+
+            self.RequestConveyorAccept.update(True)  # request conveyor to accept tray
+
+        def complete(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S15: Complete")
+
+            self.RequestConveyorAccept.update(False)  # conveyor accepted tray: turn off the request
+            self.TrayTransferRegistered.update(True)
+
+        def blocked(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S16: Blocked")
+
+        def fault(step: MemoryVariable) -> None:
+            if step.rising_edge:
+                self.logger.info("S17: Fault")
+
+            self.FaultCleared.update(True)
+
+        return {
+            "S10": reset,
+            "S11": check_permissives,
+            "S12": load_tray,
+            "S13": wait_loaded,
+            "S14": offer_to_conveyor,
+            "S15": complete,
+            "S16": blocked,
+            "S17": fault,
+        }
 
     def _init_control(self) -> None:
         if self.init_flag:
@@ -213,86 +290,88 @@ class LoadingStationPLC(AbstractPLC):
 
     def _sequence_control(self) -> None:
         self.key_input.update()
-        self.ProductionEnable.update()
 
-        if self.S10.active and self._T10_11():
+        if self.S10.active and self.T["T10_11"]():
             self.S10.deactivate()
             self.S11.activate()
 
-        if self.S11.active and not self.S11.rising_edge:
-            if self._T11_12():
+        elif self.S11.active and not self.S11.rising_edge:  # make sure action S11 is executed at least once
+            if self.T["T11_12"]():
                 self.S11.deactivate()
                 self.S12.activate()
-            if self._T11_16():
+            elif self.T["T11_16"]():
                 self.S11.deactivate()
                 self.S16.activate()
-            if self._T11_17():
+            elif self.T["T11_17"]():
                 self.S11.deactivate()
                 self.S17.activate()
 
-        if self.S12.active and self._T12_13():
+        elif self.S12.active and self.T["T12_13"]():
             self.S12.deactivate()
             self.S13.activate()
 
-        if self.S13.active:
-            if self._T13_14():
+        elif self.S13.active:
+            if self.T["T13_14"]():
                 self.S13.deactivate()
                 self.S14.activate()
-            if self._T13_17():
+            elif self.T["T13_17"]():
                 self.S13.deactivate()
                 self.S17.activate()
 
-        if self.S14.active:
-            if self._T14_15():
+        elif self.S14.active:
+            if self.TimerConveyorAccept.has_elapsed:
+                self.ConveyorAcceptTimeout.update(True)
+            if self.T["T14_15"]() or self.T["T14_16"]() or self.T["T14_17"]():
                 self.S14.deactivate()
-                self.S15.activate()
-            if self._T14_16():
-                self.S14.deactivate()
-                self.S16.activate()
-            if self._T14_17():
-                self.S14.deactivate()
-                self.S17.activate()
+                self.TimerConveyorAccept.reset()
+                self.ConveyorAcceptTimeout.update(False)
+                if self.T["T14_15"]():
+                    self.S15.activate()
+                elif self.T["T14_16"]():
+                    self.S16.activate()
+                elif self.T["T14_17"]():
+                    self.S17.activate()
 
-        if self.S15.active and self._T15_10():
-                self.S15.deactivate()
-                self.S10.activate()
+        elif self.S15.active and self.T["T15_10"]():
+            self.S15.deactivate()
+            self.S10.activate()
 
-        if self.S16.active:
-            if self._T16_11():
+        elif self.S16.active:
+            if self.T["T16_11"]():
                 self.S16.deactivate()
                 self.S11.activate()
-            if self._T16_10():
+            elif self.T["T16_10"]():
                 self.S16.deactivate()
                 self.S10.activate()
 
-        if self.S17.active and self._T17_10():
+        elif self.S17.active and self.T["T17_10"]():
             self.S17.deactivate()
             self.S10.activate()
 
     def _execute_actions(self) -> None:
         if self.S10.active:
-            self.reset()
+            self.A["S10"](self.S10)
 
-        if self.S11.active:
-            self.check_permissives(self.S11, "S11")
+        elif self.S11.active:
+            self.A["S11"](self.S11)
 
-        if self.S12.active:
-            self.start_loading_cycle(self.S12)
+        elif self.S12.active:
+            self.A["S12"](self.S12)
 
-        if self.S13.active:
-            self.wait_loading_cycle_finish(self.S13, "S13")
+        elif self.S13.active:
+            self.A["S13"](self.S13)
 
-        if self.S14.active:
-            self.offer_to_conveyor(self.S14)
+        elif self.S14.active:
+            self.A["S14"](self.S14)
 
-        if self.S15.active:
-            self.register_tray_status(self.S15)
+        elif self.S15.active:
+            self.A["S15"](self.S15)
 
-        if self.S16.active:
-            self.block_station(self.S16)
+        elif self.S16.active:
+            self.A["S16"](self.S16)
 
-        if self.S17.active:
-            self.handle_fault(self.S17)
+        elif self.S17.active:
+            self.A["S17"](self.S17)
 
     def control_routine(self) -> None:
         self._init_control()
@@ -316,7 +395,10 @@ class LoadingStationPLC(AbstractPLC):
 def main():
     import os
     import subprocess
+
     from pyberryplc.utils.log_utils import init_logger
+
+    from datablocks import db0, db1
 
     os.system("clear")
 
@@ -329,7 +411,7 @@ def main():
     ])
 
     logger = init_logger("PLC")
-    plc = LoadingStationPLC(logger)
+    plc = LoadingStationPLC(logger, db0, db1)
     plc.run()
 
 
