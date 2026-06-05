@@ -10,8 +10,7 @@ from gpiozero.pins.pigpio import PiFactory
 
 from pyberryplc.utils.email_notification import EmailNotification
 
-from .gpio import GPIO
-from .io_backend import BaseIOBackend, HardwareBackend
+from .io_backend import BaseIOBackend, HardwareBackend, IOChannel
 from .memory import MemoryVariable, HMISharedData
 from .exceptions import *
 
@@ -89,8 +88,8 @@ class AbstractPLC(ABC):
 
         # Dictionaries that hold the physical GPIO inputs/outputs used by the 
         # PLC application.
-        self._inputs: dict[str, GPIO] = {}
-        self._outputs: dict[str, GPIO] = {}
+        self._inputs: dict[str, IOChannel] = {}
+        self._outputs: dict[str, IOChannel] = {}
         
         # Dictionaries where the states of inputs/outputs are stored. These are
         # the memory registries of the PLC. The program logic reads from or 
@@ -106,10 +105,14 @@ class AbstractPLC(ABC):
         self.hmi_output_register: dict[str, MemoryVariable] = {}
         if hmi_data: self._setup_hmi_data()
         
-        # To terminate program: press Ctrl-Z and method `_exit_handler` will be
-        # called which terminates the PLC scanning loop.
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
+        # On POSIX systems, Ctrl-Z sends SIGTSTP and cleanly terminates the PLC
+        # scanning loop. Windows does not define SIGTSTP.
+        exit_signal = getattr(signal, "SIGTSTP", None)
+        if (
+            exit_signal is not None
+            and threading.current_thread() is threading.main_thread()
+        ):
+            signal.signal(exit_signal, lambda signum, frame: self._exit_handler())  #type: ignore
     
     def run(self, measure: bool = False) -> None | dict:
         """
@@ -248,10 +251,7 @@ class AbstractPLC(ABC):
         -------
         The memory variable of the digital input in the input memory registry.
         """
-        if NC_contact:
-            init_value = 1
-        else:
-            init_value = 0
+        init_value = 1 if NC_contact else 0
         self._inputs[label] = self.io_backend.create_digital_input(
             pin,
             label,

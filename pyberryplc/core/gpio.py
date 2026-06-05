@@ -136,7 +136,7 @@ class DigitalOutput(GPIO):
         self._device = DigitalOutputDevice(
             self.pin, 
             active_high=active_high,
-            initial_value=initial_value,
+            initial_value=initial_value,  #type: ignore
             pin_factory=self.pin_factory
         )
         self._device.pin.function = 'output'

@@ -7,7 +7,10 @@ counters, switches, and the main PLC execution engine.
 
 from .plc import AbstractPLC, TAbstractPLC
 from .memory import MemoryVariable, HMISharedData, SharedMemoryBlock
-from .io_backend import BaseIOBackend, HardwareBackend
+from .io_backend import (
+    BaseIOBackend, HardwareBackend, SoftwareBackend, SoftMachineState,
+    IOChannel
+)
 from .gpio import DigitalInput, DigitalOutput, PWMOutput, DigitalOutputPigpio
 from .timers import TimerSingleScan, TimerOnDelay, TimerOffDelay
 from .counters import CounterUp, CounterDown, CounterUpDown
@@ -23,6 +26,9 @@ __all__ = [
     "SharedMemoryBlock",
     "BaseIOBackend",
     "HardwareBackend",
+    "SoftwareBackend",
+    "SoftMachineState",
+    "IOChannel",
     "DigitalInput",
     "DigitalOutput",
     "PWMOutput",
