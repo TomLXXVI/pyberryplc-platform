@@ -5,7 +5,7 @@ import threading
 
 from gpiozero.pins.pigpio import PiFactory
 
-from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
+from .gpio import DigitalInput, DigitalOutput, PWMOutput
 
 
 class IOChannel(Protocol):
