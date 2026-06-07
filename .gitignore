@@ -2,3 +2,12 @@
 /notes/
 /R&D/
 /demos/demo_10/pc_side/sftp.toml
+.idea/
+/pyberryplc.egg-info/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+*.json
+*.pdf
+*.dxf
