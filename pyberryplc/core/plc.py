@@ -10,7 +10,7 @@ from gpiozero.pins.pigpio import PiFactory
 
 from pyberryplc.utils.email_notification import EmailNotification
 
-from .gpio import GPIO, DigitalInput, DigitalOutput, PWMOutput
+from .io_backend import BaseIOBackend, HardwareBackend, IOChannel
 from .memory import MemoryVariable, HMISharedData
 from .exceptions import *
 
@@ -34,6 +34,7 @@ class AbstractPLC(ABC):
         hmi_data: HMISharedData | None = None,
         logger: logging.Logger | None = None,
         pin_factory: PiFactory | None = None,
+        io_backend: BaseIOBackend | None = None,
         eml_notification: EmailNotification | None = None
     ) -> None:
         """Creates an `AbstractPLC` instance.
@@ -56,6 +57,10 @@ class AbstractPLC(ABC):
             the default pin factory is used, which is `PiGPIOFactory`. This
             requires that `pigpio` is installed on the Raspberry Pi, and that
             the `pigpiod` daemon is running in the background.
+        io_backend:
+            Backend responsible for creating the concrete I/O channels. If
+            `None`, a `HardwareBackend` is used, preserving the current GPIO
+            behavior.
         eml_notification: optional
             Instance of class `EmailNotification` (see module
             email_notification.py). Allows to send email messages if certain
@@ -70,6 +75,7 @@ class AbstractPLC(ABC):
         self.scan_time = scan_time
         self.hmi_data = hmi_data
         self.pin_factory = pin_factory
+        self.io_backend = io_backend if io_backend else HardwareBackend(pin_factory)
         self._exit: bool = False
         
         # Attaches an e-mail notification service (can be None).
@@ -82,8 +88,8 @@ class AbstractPLC(ABC):
 
         # Dictionaries that hold the physical GPIO inputs/outputs used by the 
         # PLC application.
-        self._inputs: dict[str, GPIO] = {}
-        self._outputs: dict[str, GPIO] = {}
+        self._inputs: dict[str, IOChannel] = {}
+        self._outputs: dict[str, IOChannel] = {}
         
         # Dictionaries where the states of inputs/outputs are stored. These are
         # the memory registries of the PLC. The program logic reads from or 
@@ -99,10 +105,14 @@ class AbstractPLC(ABC):
         self.hmi_output_register: dict[str, MemoryVariable] = {}
         if hmi_data: self._setup_hmi_data()
         
-        # To terminate program: press Ctrl-Z and method `_exit_handler` will be
-        # called which terminates the PLC scanning loop.
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTSTP, lambda signum, frame: self._exit_handler())
+        # On POSIX systems, Ctrl-Z sends SIGTSTP and cleanly terminates the PLC
+        # scanning loop. Windows does not define SIGTSTP.
+        exit_signal = getattr(signal, "SIGTSTP", None)
+        if (
+            exit_signal is not None
+            and threading.current_thread() is threading.main_thread()
+        ):
+            signal.signal(exit_signal, lambda signum, frame: self._exit_handler())  #type: ignore
     
     def run(self, measure: bool = False) -> None | dict:
         """
@@ -241,18 +251,11 @@ class AbstractPLC(ABC):
         -------
         The memory variable of the digital input in the input memory registry.
         """
-        if NC_contact:
-            active_state = False
-            init_value = 1
-        else:
-            active_state = True
-            init_value = 0
-        self._inputs[label] = DigitalInput(
-            pin, 
-            label, 
-            self.pin_factory, 
-            pull_up=None, 
-            active_state=active_state
+        init_value = 1 if NC_contact else 0
+        self._inputs[label] = self.io_backend.create_digital_input(
+            pin,
+            label,
+            NC_contact,
         )
         self.input_register[label] = MemoryVariable(
             curr_state=init_value,
@@ -289,12 +292,11 @@ class AbstractPLC(ABC):
         The memory variable of the digital output in the output memory registry, 
         and the memory variable of its status in the input memory registry. 
         """
-        self._outputs[label] = DigitalOutput(
-            pin, 
+        self._outputs[label] = self.io_backend.create_digital_output(
+            pin,
             label,
             active_high,
-            self.pin_factory,
-            init_value
+            init_value,
         )
         self.output_register[label] = MemoryVariable(
             curr_state=init_value,
@@ -352,9 +354,9 @@ class AbstractPLC(ABC):
         The memory variable of the PWM output in the output memory registry, 
         and the memory variable of its status in the input memory registry.
         """
-        self._outputs[label] = PWMOutput(
-            pin, label, self.pin_factory, init_value, frame_width, 
-            min_pulse_width, max_pulse_width, min_value, max_value
+        self._outputs[label] = self.io_backend.create_pwm_output(
+            pin, label, init_value, frame_width, min_pulse_width,
+            max_pulse_width, min_value, max_value
         )
         self.output_register[label] = MemoryVariable(
             curr_state=init_value,
