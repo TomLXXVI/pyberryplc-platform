@@ -44,7 +44,7 @@ class SoftMachine:
         port: int = 8082,
         refresh_interval: float = 0.25,
         on_exit: Callable[[], None] | None = None,
-        logger: logging.Logger | None = None,
+        logger: logging.Logger | Mapping[str, logging.Logger] | None = None,
         log_lines: int = 200,
         close_browser_on_exit: bool = True,
     ) -> None:
@@ -76,13 +76,24 @@ class SoftMachine:
 
     @staticmethod
     def _setup_log_handler(
-        logger: logging.Logger | None,
+        logger: logging.Logger | Mapping[str, logging.Logger] | None,
         log_lines: int,
     ) -> SoftMachineLogHandler | None:
         if logger is None:
             return None
         handler = SoftMachineLogHandler(log_lines)
-        logger.addHandler(handler)
+        if isinstance(logger, logging.Logger):
+            loggers = [logger]
+        else:
+            loggers = list(logger.values())
+
+        seen_logger_ids: set[int] = set()
+        for logger_ in loggers:
+            logger_id = id(logger_)
+            if logger_id in seen_logger_ids:
+                continue
+            seen_logger_ids.add(logger_id)
+            logger_.addHandler(handler)
         return handler
 
     def run(self) -> None:
@@ -108,26 +119,29 @@ class SoftMachine:
                 ui.label(self.title).classes("text-lg font-bold")
                 ui.button("Exit", color="red", on_click=self.exit)
 
-        with ui.column().classes("w-full p-4 gap-4"):
-            tabs = ui.tabs().classes("w-full")
-            with tabs:
-                ui.tab("I/O")
-                if self.datablocks:
-                    ui.tab("Datablocks")
-                if self.log_handler:
-                    ui.tab("Log")
+        with ui.row().classes("w-full p-4 gap-4 items-start"):
+            # content_width = "w-[calc(100%-420px)]" if self.log_handler else "w-full"
+            content_width = "min-w-0 flex-1 gap-4" if self.log_handler else "w-full"
+            with ui.column().classes(f"{content_width} gap-4"):
+                tabs = ui.tabs().classes("w-full")
+                with tabs:
+                    ui.tab("I/O")
+                    if self.datablocks:
+                        ui.tab("Datablocks")
 
-            with ui.tab_panels(tabs, value="I/O").classes("w-full"):
-                with ui.tab_panel("I/O"):
-                    self._build_io_panel(ui)
+                with ui.tab_panels(tabs, value="I/O").classes("w-full"):
+                    with ui.tab_panel("I/O"):
+                        self._build_io_panel(ui)
 
-                if self.datablocks:
-                    with ui.tab_panel("Datablocks"):
-                        self._build_datablocks_panel(ui)
+                    if self.datablocks:
+                        with ui.tab_panel("Datablocks"):
+                            self._build_datablocks_panel(ui)
 
-                if self.log_handler:
-                    with ui.tab_panel("Log"):
-                        self._build_log_panel(ui)
+            if self.log_handler:
+                # with ui.column().classes("w-[400px] gap-2"):
+                with ui.column().classes("w-[60vw] min-w-[819px] max-w-[1229px] shrink-0 gap-2"):
+                    ui.label("Log").classes("text-md font-bold")
+                    self._build_log_panel(ui)
 
         ui.timer(self.refresh_interval, self.refresh)
         self.refresh()
@@ -299,7 +313,7 @@ class SoftMachine:
         self._log_html = ui.html(
             '<pre style="font-family: monospace; font-size: 13px; '
             'margin: 0; line-height: 1.2;"></pre>'
-        ).classes("w-full h-[360px] overflow-auto bg-white border rounded p-2")
+        ).classes("w-full h-[calc(100vh-150px)] overflow-auto bg-white border rounded p-2")
 
     def refresh(self) -> None:
         """Refresh UI elements from the current soft-machine state."""
