@@ -6,7 +6,7 @@ from pyberryplc.core import (
     SoftwareBackend,
     SoftMachineState,
     SharedMemoryBlock,
-    MemoryVariable,
+    MemoryVariable, EmergencyException,
 )
 
 
@@ -44,7 +44,7 @@ class InfeedConveyorPLC(AbstractPLC):
 
     def _create_variables(self) -> None:
         self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitMain = self.db0.data["ExitMain"]
+        self.Exit = self.db0.data["Exit"]
 
         self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
         self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
@@ -54,7 +54,8 @@ class InfeedConveyorPLC(AbstractPLC):
         self.ConveyorStart = self.add_digital_input("I00", "ConveyorStart")
         self.HandoffPositionFree = self.add_digital_input("I01", "HandoffPositionFree")
         self.TrayExitFree = self.add_digital_input("I02", "TrayExitFree")
-        self.ResetRequest = self.add_digital_input("I04", "ResetRequest")
+        self.ResetButton = self.add_digital_input("I04", "ResetButton")
+        self.EmergencyButton = self.add_digital_input("I08", "EmergencyButton", NC_contact=True)
 
         self.FaultCleared = MemoryVariable()
 
@@ -101,7 +102,7 @@ class InfeedConveyorPLC(AbstractPLC):
             return self.TrayTransferDone.active
 
         def T25_20() -> bool:
-            return self.FaultCleared.active and self.ResetRequest.active
+            return self.FaultCleared.active and self.ResetButton.active
 
         return {
             "T20_21": T20_21,
@@ -161,7 +162,7 @@ class InfeedConveyorPLC(AbstractPLC):
             self.S20.activate()
 
     def _sequence_control(self) -> None:
-        if self.ExitMain.active:
+        if self.Exit.active:
             self.logger.info("Closing down infeed conveyor PLC")
             self.exit()
 
@@ -216,8 +217,17 @@ class InfeedConveyorPLC(AbstractPLC):
         if self.S25.active:
             self.A["S25"](self.S25)
 
+    def _check_emergency_interlocks(self) -> None:
+        if hasattr(self, "db0") and self.db0.data["EmergencyStopActive"].active:
+            raise EmergencyException("Global Emergency Stop Activated")
+
+        if "EmergencyButton" in self.input_register and not self.input_register["EmergencyButton"].active:
+            self.db0.data["EmergencyStopActive"].update(True)
+            raise EmergencyException("Local Emergency Button Pressed")
+
     def control_routine(self) -> None:
         self._init_control()
+        self._check_emergency_interlocks()  # <--- ALWAYS CHECK FIRST!
         self._sequence_control()
         self._execute_actions()
 
@@ -225,8 +235,18 @@ class InfeedConveyorPLC(AbstractPLC):
         pass
 
     def emergency_routine(self) -> None:
-        pass
+        self.logger.critical("EMERGENCY STOP: Conveyor forcing all outputs LOW!")
+        # Immediately set all critical outputs to False in the register
+        # (so that the 'finally' block in AbstractPLC immediately makes them
+        # physically low)
+        for output_name in self.output_register:
+            self.output_register[output_name].update(False)
+
+        # Deactivate all active Grafcet steps so that the machine stops
+        for step in [self.S20, self.S21, self.S22, self.S23, self.S24, self.S25]:
+            step.deactivate()
 
     def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        self.logger.critical(exception)
+        self.logger.critical(f"PLC crash: {exception}")
+        self.emergency_routine()
         raise exception

@@ -9,7 +9,8 @@ from pyberryplc.core import (
     SoftMachineState,
     MemoryVariable,
     SharedMemoryBlock,
-    TimerOffDelay
+    TimerOffDelay,
+    EmergencyException,
 )
 
 from loading_station_client import LoadingStation
@@ -63,7 +64,7 @@ class LoadingStationPLC(AbstractPLC):
     def _create_variables(self) -> None:
         # Shared memory
         self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitMain = self.db0.data["ExitMain"]
+        self.Exit = self.db0.data["Exit"]
 
         self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
         self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
@@ -73,7 +74,8 @@ class LoadingStationPLC(AbstractPLC):
         # Inputs
         self.LoadingStationStart = self.add_digital_input("I00", "LoadingStationStart")
         self.TrayToLoadAvailable = self.add_digital_input("I01", "TrayToLoadAvailable")
-        self.ResetRequest = self.add_digital_input("I02", "ResetRequest")
+        self.ResetButton = self.add_digital_input("I02", "ResetButton")
+        self.EmergencyButton = self.add_digital_input("I08", "EmergencyButton", NC_contact=True)
 
         # Internal variables
         self.LoadingStationBusy = MemoryVariable()
@@ -149,7 +151,7 @@ class LoadingStationPLC(AbstractPLC):
             return self.ConveyorFaultActive.active
 
         def T18_10() -> bool:
-            return self.FaultCleared.active and self.ResetRequest.active
+            return self.FaultCleared.active and self.ResetButton.active
 
         return {
             "T10_11": T10_11,
@@ -282,7 +284,7 @@ class LoadingStationPLC(AbstractPLC):
             self.S10.activate()
 
     def _sequence_control(self) -> None:
-        if self.ExitMain.active:
+        if self.Exit.active:
             self.logger.info("Closing down loading station PLC")
             self.exit()
 
@@ -366,8 +368,17 @@ class LoadingStationPLC(AbstractPLC):
         elif self.S18.active:
             self.A["S18"](self.S18)
 
+    def _check_emergency_interlocks(self) -> None:
+        if hasattr(self, "db0") and self.db0.data["EmergencyStopActive"].active:
+            raise EmergencyException("Global Emergency Stop Activated")
+
+        if "EmergencyButton" in self.input_register and not self.input_register["EmergencyButton"].active:
+            self.db0.data["EmergencyStopActive"].update(True)
+            raise EmergencyException("Local Emergency Button Pressed")
+
     def control_routine(self) -> None:
         self._init_control()
+        self._check_emergency_interlocks()
         self._sequence_control()
         self._execute_actions()
 
@@ -379,9 +390,24 @@ class LoadingStationPLC(AbstractPLC):
         self.loading_station.close()
 
     def emergency_routine(self) -> None:
-        self.exit_routine()
+        self.logger.critical("EMERGENCY STOP: Loading Station safety shutdown.")
+
+        # 1. Force local registers low
+        for output_name in self.output_register:
+            self.output_register[output_name].update(False)
+
+        # 2. Notify the remote machine immediately via the TCP client!
+        try:
+            self.loading_station.shutdown()
+        except Exception as e:
+            self.logger.error(f"Could not send emergency shutdown to remote device: {e}.")
+        self.loading_station.close()
+
+        # 3. Reset the steps
+        for step in [self.S10, self.S11, self.S12, self.S13, self.S14, self.S15, self.S16, self.S17, self.S18]:
+            step.deactivate()
 
     def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        self.exit_routine()
-        self.logger.critical(exception)
+        self.logger.critical(f"PLC crash: {exception}")
+        self.emergency_routine()
         raise exception

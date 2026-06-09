@@ -35,6 +35,7 @@ class TCPRemoteDeviceServer(ABC):
         self.port = port
         self.conn_to_master = None
         self.logger = logger
+        self.initialize()
 
     @abstractmethod
     def handle_command(self, command: dict[str, str]) -> dict[str, Any]:

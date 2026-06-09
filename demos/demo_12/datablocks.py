@@ -6,7 +6,8 @@ db0 = SharedMemoryBlock(
     name="DB0",
     data={
         "ProductionEnable": MemoryVariable(),  # main plc writes / other units read
-        "ExitMain": MemoryVariable(),          # main plc writes / other units read
+        "Exit": MemoryVariable(),          # main plc writes / other units read
+        "EmergencyStopActive": MemoryVariable(),
     }
 )
 

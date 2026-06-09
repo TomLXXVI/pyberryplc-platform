@@ -11,3 +11,5 @@ __pycache__/
 *.json
 *.pdf
 *.dxf
+/demos/demo_12/grafcet/
+/demos/demo_12/logs/

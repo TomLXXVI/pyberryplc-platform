@@ -5,7 +5,8 @@ from pyberryplc.core import (
     AbstractPLC,
     SoftMachineState,
     SoftwareBackend,
-    MemoryVariable
+    MemoryVariable,
+    EmergencyException,
 )
 from pyberryplc.utils.log_utils import init_logger
 
@@ -54,12 +55,14 @@ class MainPLC(AbstractPLC):
         self.A = self._create_actions()
 
     def _create_variables(self) -> None:
-        self.StartRequest = self.add_digital_input("I00", "StartRequest")
-        self.StopRequest = self.add_digital_input("I01", "StopRequest")
-        self.ExitRequest = self.add_digital_input("I02", "ExitRequest")
+        self.StartButton = self.add_digital_input("I00", "StartButton")
+        self.StopButton = self.add_digital_input("I01", "StopButton")
+        self.ExitButton = self.add_digital_input("I02", "ExitButton")
+        self.ResetButton = self.add_digital_input("I03", "ResetButton")
+        self.EmergencyButton = self.add_digital_input("I08", "EmergencyButton", NC_contact=True)
 
         self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitMain = self.db0.data["ExitMain"]
+        self.Exit = self.db0.data["Exit"]
 
     def _create_steps(self) -> None:
         self.S0 = self.add_marker("S0")
@@ -68,10 +71,10 @@ class MainPLC(AbstractPLC):
     def _create_transitions(self) -> dict[str, Callable[[], bool]]:
 
         def T0_1() -> bool:
-            return self.StartRequest.active
+            return self.StartButton.active
 
         def T1_0() -> bool:
-            return self.StopRequest.active
+            return self.StopButton.active
 
         return {
             "T0_1": T0_1,
@@ -108,9 +111,9 @@ class MainPLC(AbstractPLC):
             self.S0.activate()
 
     def _sequence_control(self) -> None:
-        if self.ExitRequest.active:
-            self.logger.info("Received ExitRequest. Closing down the system.")
-            self.ExitMain.update(True)
+        if self.ExitButton.active:
+            self.logger.info("Received ExitButton. Closing down the system.")
+            self.Exit.update(True)
             self.exit()
         
         if self.S0.active and self.T["T0_1"]():
@@ -126,22 +129,32 @@ class MainPLC(AbstractPLC):
         elif self.S1.active:
             self.A["S1"](self.S1)
 
+    def _check_emergency_interlocks(self) -> None:
+        if hasattr(self, "db0") and self.db0.data["EmergencyStopActive"].active:
+            raise EmergencyException("Global Emergency Stop Activated")
+
+        if "EmergencyButton" in self.input_register and not self.input_register["EmergencyButton"].active:
+            self.db0.data["EmergencyStopActive"].update(True)
+            raise EmergencyException("Local Emergency Button Pressed")
+
     def control_routine(self) -> None:
         self._init_control()
+        self._check_emergency_interlocks()
         self._sequence_control()
         self._execute_actions()
 
     def exit_routine(self) -> None:
-
         self.loading_station_thread.join()
         self.infeed_conveyor_thread.join()
 
     def emergency_routine(self) -> None:
-        self.exit_routine()
+        self.logger.critical("MAIN PLC: Emergency state. Waiting for child threads to terminate safely.")
+        self.loading_station_thread.join(timeout=1.0)
+        self.infeed_conveyor_thread.join(timeout=1.0)
 
     def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        self.logger.critical(exception)
-        self.exit_routine()
+        self.logger.critical(f"PLC crash: {exception}")
+        self.emergency_routine()
         raise exception
 
 
@@ -166,7 +179,7 @@ def main():
             else 0
         ),
     )
-        
+
     main_plc = MainPLC(
         main_state,
         loading_station_state, 
