@@ -1,11 +1,12 @@
-from typing import Any, Protocol
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Protocol
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import threading
 
-from gpiozero.pins.pigpio import PiFactory
-
-from .gpio import DigitalInput, DigitalOutput, PWMOutput
+if TYPE_CHECKING:
+    from gpiozero.pins.pigpio import PiFactory
 
 
 class IOChannel(Protocol):
@@ -167,6 +168,8 @@ class HardwareBackend(BaseIOBackend):
         label: str,
         NC_contact: bool | None = False,
     ) -> IOChannel:
+        from .gpio import DigitalInput
+
         active_state = False if NC_contact else True
         return DigitalInput(
             pin,
@@ -183,6 +186,8 @@ class HardwareBackend(BaseIOBackend):
         active_high: bool = True,
         init_value: bool = 0,  # type: ignore
     ) -> IOChannel:
+        from .gpio import DigitalOutput
+
         return DigitalOutput(
             pin,
             label,
@@ -202,6 +207,8 @@ class HardwareBackend(BaseIOBackend):
         min_value: float = 0.0,
         max_value: float = 1.0,
     ) -> IOChannel:
+        from .gpio import PWMOutput
+
         return PWMOutput(
             pin, label, self.pin_factory, init_value, frame_width,
             min_pulse_width, max_pulse_width, min_value, max_value

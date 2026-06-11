@@ -18,3 +18,7 @@ class ConfigurationError(Exception):
 
 class EmergencyException(Exception):
     pass
+
+
+class RecoveryException(Exception):
+    pass

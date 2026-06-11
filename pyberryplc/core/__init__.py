@@ -5,21 +5,27 @@ This module exposes base classes and utilities for digital I/O, timers,
 counters, switches, and the main PLC execution engine.
 """
 
-from .plc import AbstractPLC, TAbstractPLC
+from .plc_new import AbstractPLC, EmergencyConfig, PLCMode, TAbstractPLC
 from .memory import MemoryVariable, HMISharedData, SharedMemoryBlock
 from .io_backend import (
     BaseIOBackend, HardwareBackend, SoftwareBackend, SoftMachineState,
     IOChannel
 )
-from .gpio import DigitalInput, DigitalOutput, PWMOutput, DigitalOutputPigpio
 from .timers import TimerSingleScan, TimerOnDelay, TimerOffDelay
 from .counters import CounterUp, CounterDown, CounterUpDown
 from .switches import ToggleSwitch
-from .exceptions import InternalCommunicationError, ConfigurationError, EmergencyException
+from .exceptions import (
+    InternalCommunicationError,
+    ConfigurationError,
+    EmergencyException,
+    RecoveryException,
+)
 
 
 __all__ = [
     "AbstractPLC",
+    "EmergencyConfig",
+    "PLCMode",
     "TAbstractPLC",
     "MemoryVariable",
     "HMISharedData",
@@ -29,10 +35,6 @@ __all__ = [
     "SoftwareBackend",
     "SoftMachineState",
     "IOChannel",
-    "DigitalInput",
-    "DigitalOutput",
-    "PWMOutput",
-    "DigitalOutputPigpio",
     "TimerSingleScan",
     "TimerOnDelay",
     "TimerOffDelay",
@@ -42,5 +44,6 @@ __all__ = [
     "ToggleSwitch",
     "InternalCommunicationError",
     "ConfigurationError",
-    "EmergencyException"
+    "EmergencyException",
+    "RecoveryException",
 ]

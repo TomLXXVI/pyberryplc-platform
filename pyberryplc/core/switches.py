@@ -1,4 +1,4 @@
-from .plc import MemoryVariable
+from .memory import MemoryVariable
 
 
 class ToggleSwitch:
