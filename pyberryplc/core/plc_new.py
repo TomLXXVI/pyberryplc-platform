@@ -127,6 +127,7 @@ class AbstractPLC(ABC):
         self.mode = PLCMode.INIT
         self._exit = False
         self._emergency_entered = False
+        self._preserve_marker_edges = False
         self._initial_marker_labels: set[str] = set()
 
         self._inputs: dict[str, IOChannel] = {}
@@ -215,7 +216,6 @@ class AbstractPLC(ABC):
 
     def startup_routine(self) -> None:
         """Hook called once before the first running scan."""
-        self.activate_initial_markers()
 
     def on_emergency_enter(self) -> None:
         """Hook called once when the PLC enters emergency mode."""
@@ -260,12 +260,37 @@ class AbstractPLC(ABC):
         return local_active or global_active
 
     def can_recover(self) -> bool:
-        """Return ``True`` when emergency conditions are clear and reset is active."""
+        """Return ``True`` when recovery conditions are met.
+
+        Recovery is allowed when the local emergency-stop input is released and
+        either the local reset input is active, or the optional global emergency
+        flag has already been cleared by another PLC unit. If a global
+        emergency flag is still active, a local reset may only recover this PLC
+        when this PLC is configured to clear that global flag.
+        """
         if self.emergency_button is not None and not self.emergency_button.active:
             return False
-        if self.reset_button is None:
-            return False
-        return self.reset_button.active
+
+        global_emergency = self.emergency_config.global_emergency
+        global_active = (
+            global_emergency.active
+            if global_emergency is not None
+            else False
+        )
+        reset_active = (
+            self.reset_button.active
+            if self.reset_button is not None
+            else False
+        )
+
+        if global_emergency is not None and not global_active:
+            return True
+
+        return reset_active and (
+            global_emergency is None
+            or not global_active
+            or self.emergency_config.clear_global_on_recover
+        )
 
     def force_outputs_off(self) -> None:
         """Set all output register values to ``False``."""
@@ -389,6 +414,7 @@ class AbstractPLC(ABC):
 
     def _execute_scan(self) -> None:
         if self.mode == PLCMode.INIT:
+            self.activate_initial_markers()
             self.startup_routine()
             self.mode = PLCMode.RUNNING
 
@@ -425,6 +451,7 @@ class AbstractPLC(ABC):
         if self.emergency_config.clear_global_on_recover:
             self._set_global_emergency(False)
         self._emergency_entered = False
+        self._preserve_marker_edges = True
         self.mode = PLCMode.RUNNING
         self.on_recovered()
         self.logger.info("PLC successfully recovered to RUNNING mode.")
@@ -519,8 +546,11 @@ class AbstractPLC(ABC):
                     self.hmi_data.analog_outputs[name] = mem_var.curr_state
 
     def _update_previous_states(self) -> None:
-        for marker in self.marker_register.values():
-            marker.update(marker.curr_state)
+        if self._preserve_marker_edges:
+            self._preserve_marker_edges = False
+        else:
+            for marker in self.marker_register.values():
+                marker.update(marker.curr_state)
         for output in self.output_register.values():
             output.update(output.curr_state)
         if self.hmi_data:

@@ -65,8 +65,10 @@ Default emergency behaviour:
 
 Default startup and recovery behaviour:
 
-- markers registered with `initial=True` are activated during startup;
+- markers registered with `initial=True` are activated before startup;
 - recovery is allowed when the emergency button is released and reset is active;
+- PLC units with a shared global emergency flag may recover when that global
+  flag is cleared by another PLC;
 - all outputs remain off for the recovery scan;
 - all markers are deactivated;
 - markers registered with `initial=True` are activated again during recovery.
