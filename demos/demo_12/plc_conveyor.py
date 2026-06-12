@@ -5,9 +5,11 @@ from pyberryplc.core import (
     AbstractPLC,
     SoftwareBackend,
     SoftMachineState,
-    SharedMemoryBlock,
     MemoryVariable,
+    EmergencyConfig
 )
+
+from datablocks import db0, db1
 
 
 class InfeedConveyorPLC(AbstractPLC):
@@ -15,16 +17,18 @@ class InfeedConveyorPLC(AbstractPLC):
     def __init__(
         self,
         logger: logging.Logger,
-        soft_machine_state: SoftMachineState,
-        db0: SharedMemoryBlock,  # shared with main plc
-        db1: SharedMemoryBlock,  # shared with loading station
+        soft_machine_state: SoftMachineState
     ) -> None:
         super().__init__(
             logger=logger,
-            io_backend=SoftwareBackend(soft_machine_state)
+            io_backend=SoftwareBackend(soft_machine_state),
+            emergency_config=EmergencyConfig(
+                emergency_pin="I07",
+                reset_pin="I08",
+                global_emergency=db0.data["EmergencyStopActive"],
+                clear_global_on_recover=False
+            )
         )
-        self.init_flag = True
-
         self.db0 = db0
         self.db1 = db1
 
@@ -35,7 +39,7 @@ class InfeedConveyorPLC(AbstractPLC):
         self.A = self._create_actions()
 
     def _create_steps(self) -> None:
-        self.S20 = self.add_marker("S20")
+        self.S20 = self.add_marker("S20", init_value=True)
         self.S21 = self.add_marker("S21")
         self.S22 = self.add_marker("S22")
         self.S23 = self.add_marker("S23")
@@ -44,7 +48,7 @@ class InfeedConveyorPLC(AbstractPLC):
 
     def _create_variables(self) -> None:
         self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitMain = self.db0.data["ExitMain"]
+        self.ExitFlag = self.db0.data["ExitFlag"]
 
         self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
         self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
@@ -54,7 +58,6 @@ class InfeedConveyorPLC(AbstractPLC):
         self.ConveyorStart = self.add_digital_input("I00", "ConveyorStart")
         self.HandoffPositionFree = self.add_digital_input("I01", "HandoffPositionFree")
         self.TrayExitFree = self.add_digital_input("I02", "TrayExitFree")
-        self.ResetRequest = self.add_digital_input("I04", "ResetRequest")
 
         self.FaultCleared = MemoryVariable()
 
@@ -101,7 +104,7 @@ class InfeedConveyorPLC(AbstractPLC):
             return self.TrayTransferDone.active
 
         def T25_20() -> bool:
-            return self.FaultCleared.active and self.ResetRequest.active
+            return self.FaultCleared.active and self.reset_button.active  #type: ignore
 
         return {
             "T20_21": T20_21,
@@ -154,17 +157,19 @@ class InfeedConveyorPLC(AbstractPLC):
             "S25": fault,
         }
 
-    def _init_control(self) -> None:
-        if self.init_flag:
-            self.logger.info("Init infeed conveyor PLC")
-            self.init_flag = False
-            self.S20.activate()
+    def startup_routine(self) -> None:
+        self.logger.info("Start Infeed Conveyor PLC")
+
+    def _reset(self):
+        self.ConveyorReadyToAccept.update(False)
+        self.ConveyorFaultActive.update(False)
+        self.FaultCleared.update(False)
+
+    def recover_routine(self) -> None:
+        super().recover_routine()
+        self._reset()
 
     def _sequence_control(self) -> None:
-        if self.ExitMain.active:
-            self.logger.info("Closing down infeed conveyor PLC")
-            self.exit()
-
         if self.S20.active and self.T["T20_21"]():
             self.S20.deactivate()
             self.S21.activate()
@@ -217,16 +222,9 @@ class InfeedConveyorPLC(AbstractPLC):
             self.A["S25"](self.S25)
 
     def control_routine(self) -> None:
-        self._init_control()
+        if self.ExitFlag.active:
+            self.logger.info("Exit Infeed Conveyor PLC")
+            self.exit()
+
         self._sequence_control()
         self._execute_actions()
-
-    def exit_routine(self) -> None:
-        pass
-
-    def emergency_routine(self) -> None:
-        pass
-
-    def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        self.logger.critical(exception)
-        raise exception

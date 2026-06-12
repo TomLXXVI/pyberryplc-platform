@@ -34,5 +34,11 @@ class LoadingStation(TCPRemoteDeviceClient):
     def get_loading_progress(self) -> None:
         self.send_command(Command.GET_LOADING_PROGRESS)
 
+    def emergency_stop(self) -> None:
+        self.send_command(Command.EMERGENCY_STOP)
+
+    def reset(self) -> None:
+        self.send_command(Command.RESET)
+
     def shutdown(self) -> None:
         self.send_command(Command.SHUTDOWN)

@@ -5,8 +5,9 @@ from pyberryplc.core import SharedMemoryBlock, MemoryVariable
 db0 = SharedMemoryBlock(
     name="DB0",
     data={
-        "ProductionEnable": MemoryVariable(),  # main plc writes / other units read
-        "ExitMain": MemoryVariable(),          # main plc writes / other units read
+        "ProductionEnable": MemoryVariable(),    # main plc writes / other units read
+        "ExitFlag": MemoryVariable(),                # main plc writes / other units read
+        "EmergencyStopActive": MemoryVariable(),
     }
 )
 

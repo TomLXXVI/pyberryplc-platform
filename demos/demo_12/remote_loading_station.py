@@ -24,6 +24,8 @@ class Command(StrEnum):
     CHECK_OPERATIONAL_STATE = "check_operational_state"
     START_LOADING = "start_loading"
     GET_LOADING_PROGRESS = "get_loading_progress"
+    EMERGENCY_STOP = "emergency_stop"
+    RESET = "reset"
     SHUTDOWN = "shutdown"
 
 
@@ -38,6 +40,7 @@ class LoadingStation(TCPRemoteDeviceServer):
         super().__init__(logger, host, port)
         self.timer_loading = TimerOffDelay(10)
         self.status = Status.OFF
+        self._abort_loading_cycle = False
 
     def initialize(self) -> None:
         pass
@@ -51,6 +54,10 @@ class LoadingStation(TCPRemoteDeviceServer):
                 return self._start_loading()
             case Command.GET_LOADING_PROGRESS:
                 return self._get_loading_progress()
+            case Command.EMERGENCY_STOP:
+                return self._emergency_stop()
+            case Command.RESET:
+                return self._reset()
             case Command.SHUTDOWN:
                 return self._shutdown()
             case _:
@@ -79,6 +86,11 @@ class LoadingStation(TCPRemoteDeviceServer):
         self.status = Status.BUSY
 
         while self.timer_loading.running:
+            if self._abort_loading_cycle:
+                self.status = Status.OFF
+                self.timer_loading.reset()
+                return
+
             elapsed = time.perf_counter() - t_start
 
             if error_after is not None and elapsed >= error_after:
@@ -97,6 +109,7 @@ class LoadingStation(TCPRemoteDeviceServer):
         self.timer_loading.reset()
 
     def _start_loading(self) -> dict[str, Any]:
+        self._abort_loading_cycle = False
         self.status = Status.BUSY
         threading.Thread(target=self._run_loading_cycle, daemon=True).start()
         return self._response("Loading cycle started.")
@@ -113,6 +126,17 @@ class LoadingStation(TCPRemoteDeviceServer):
                 return self._response("Something went wrong during loading.")
             case _:
                 return self._response("Loading cycle progression unknown.")
+
+    def _emergency_stop(self) -> dict[str, Any]:
+        self._abort_loading_cycle = True
+        self.status = Status.OFF
+        return self._response("Emergency stop acknowledged.")
+
+    def _reset(self) -> dict[str, Any]:
+        self._abort_loading_cycle = False
+        self.timer_loading.reset()
+        self.status = Status.READY
+        return self._response("Reset acknowledged.")
 
     def _shutdown(self) -> dict[str, Any]:
         return {"status": self.status, "message": "Shutting down."}

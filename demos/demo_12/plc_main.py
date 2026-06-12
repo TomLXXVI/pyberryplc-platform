@@ -5,13 +5,14 @@ from pyberryplc.core import (
     AbstractPLC,
     SoftMachineState,
     SoftwareBackend,
-    MemoryVariable
+    MemoryVariable,
+    EmergencyConfig,
 )
 from pyberryplc.utils.log_utils import init_logger
 
-from datablocks import db0, db1
 from plc_loading_station import LoadingStationPLC
 from plc_conveyor import InfeedConveyorPLC
+from datablocks import db0, db1
 
 
 class MainPLC(AbstractPLC):
@@ -24,26 +25,25 @@ class MainPLC(AbstractPLC):
     ) -> None:
         super().__init__(
             logger=init_logger("MAIN PLC", log_file="logs/main_plc.log", console=False),
-            io_backend=SoftwareBackend(main_state)
+            io_backend=SoftwareBackend(main_state),
+            emergency_config=EmergencyConfig(
+                emergency_pin="I07",
+                reset_pin="I08",
+                global_emergency=db0.data["EmergencyStopActive"]
+            )
         )
-
-        self.init_flag = True
 
         self.db0 = db0
 
         self.loading_station_plc = LoadingStationPLC(
             logger=init_logger("LOADING STATION PLC", log_file="logs/loading_plc.log", console=False),
             soft_machine_state=loading_station_state,
-            db0=db0,
-            db1=db1
         )
         self.loading_station_thread = threading.Thread(target=self.loading_station_plc.run)
 
         self.infeed_conveyor_plc = InfeedConveyorPLC(
             logger=init_logger("INFEED CONVEYOR PLC", log_file="logs/infeed_conveyor_plc.log", console=False),
             soft_machine_state=infeed_conveyor_state,
-            db0=db0,
-            db1=db1
         )
         self.infeed_conveyor_thread = threading.Thread(target=self.infeed_conveyor_plc.run)
 
@@ -54,24 +54,24 @@ class MainPLC(AbstractPLC):
         self.A = self._create_actions()
 
     def _create_variables(self) -> None:
-        self.StartRequest = self.add_digital_input("I00", "StartRequest")
-        self.StopRequest = self.add_digital_input("I01", "StopRequest")
-        self.ExitRequest = self.add_digital_input("I02", "ExitRequest")
+        self.StartButton = self.add_digital_input("I00", "StartButton")
+        self.StopButton = self.add_digital_input("I01", "StopButton")
+        self.ExitButton = self.add_digital_input("I02", "ExitButton")
 
         self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitMain = self.db0.data["ExitMain"]
+        self.ExitFlag = self.db0.data["ExitFlag"]
 
     def _create_steps(self) -> None:
-        self.S0 = self.add_marker("S0")
+        self.S0 = self.add_marker("S0", init_value=True)
         self.S1 = self.add_marker("S1")
 
     def _create_transitions(self) -> dict[str, Callable[[], bool]]:
 
         def T0_1() -> bool:
-            return self.StartRequest.active
+            return self.StartButton.active
 
         def T1_0() -> bool:
-            return self.StopRequest.active
+            return self.StopButton.active
 
         return {
             "T0_1": T0_1,
@@ -97,22 +97,16 @@ class MainPLC(AbstractPLC):
             "S1": enabled,
         }
 
-    def _init_control(self) -> None:
-        if self.init_flag:
-            self.logger.info("Init main PLC")
-            self.init_flag = False
-            
-            self.loading_station_thread.start()
-            self.infeed_conveyor_thread.start()
+    def startup_routine(self) -> None:
+        self.logger.info("Start Main PLC")
+        self.loading_station_thread.start()
+        self.infeed_conveyor_thread.start()
 
-            self.S0.activate()
+    def recover_routine(self) -> None:
+        super().recover_routine()
+        self.ProductionEnable.update(False)
 
     def _sequence_control(self) -> None:
-        if self.ExitRequest.active:
-            self.logger.info("Received ExitRequest. Closing down the system.")
-            self.ExitMain.update(True)
-            self.exit()
-        
         if self.S0.active and self.T["T0_1"]():
             self.S0.deactivate()
             self.S1.activate()
@@ -127,21 +121,28 @@ class MainPLC(AbstractPLC):
             self.A["S1"](self.S1)
 
     def control_routine(self) -> None:
-        self._init_control()
+        if self.ExitButton.active:
+            self.logger.info("Received ExitButton. Closing down the system.")
+            self.ExitFlag.update(True)
+            self.exit()
+
         self._sequence_control()
         self._execute_actions()
 
     def exit_routine(self) -> None:
-
+        super().exit_routine()
         self.loading_station_thread.join()
         self.infeed_conveyor_thread.join()
 
+    def on_emergency_enter(self) -> None:
+        self.loading_station_thread.join(timeout=1.0)
+        self.infeed_conveyor_thread.join(timeout=1.0)
+
     def emergency_routine(self) -> None:
-        self.exit_routine()
+        super().emergency_routine()
 
     def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        self.logger.critical(exception)
-        self.exit_routine()
+        super().crash_routine(exception)
         raise exception
 
 
@@ -166,7 +167,7 @@ def main():
             else 0
         ),
     )
-        
+
     main_plc = MainPLC(
         main_state,
         loading_station_state, 
