@@ -18,7 +18,7 @@ import logging
 from pyberryplc.core import AbstractPLC, SharedMemoryBlock
 from pyberryplc.core.timers import TimerOnDelay
 from pyberryplc.core.counters import CounterUp
-from pyberryplc.utils.remote_interface_client_old import TCPRemoteDeviceClient
+from pyberryplc.remote_device.remote_interface_client_old import TCPRemoteDeviceClient
 
 
 class LoadingStation(AbstractPLC):

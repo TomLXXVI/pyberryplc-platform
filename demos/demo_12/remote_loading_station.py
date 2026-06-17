@@ -7,7 +7,7 @@ from enum import StrEnum
 import random
 
 
-from pyberryplc.utils.remote_interface_server import TCPRemoteDeviceServer
+from pyberryplc.remote_device.remote_interface_server import TCPRemoteDeviceServer
 from pyberryplc.core import TimerOffDelay
 
 
@@ -143,7 +143,7 @@ class LoadingStation(TCPRemoteDeviceServer):
 
 
 def main():
-    from pyberryplc.utils.remote_interface_server import init_file_logger
+    from pyberryplc.remote_device.remote_interface_server import init_file_logger
 
     demo_dir = Path(__file__).resolve().parent
     logger = init_file_logger(

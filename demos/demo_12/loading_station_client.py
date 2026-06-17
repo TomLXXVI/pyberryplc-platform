@@ -1,6 +1,6 @@
 import logging
 
-from pyberryplc.utils.remote_interface_client import TCPRemoteDeviceClient
+from pyberryplc.remote_device.remote_interface_client import TCPRemoteDeviceClient
 
 from remote_loading_station import Command, Status
 
