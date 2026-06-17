@@ -33,7 +33,6 @@ class TCPRemoteDeviceServer(ABC):
     ) -> None:
         self.host = host
         self.port = port
-        self.conn_to_master = None
         self.logger = logger
 
     @abstractmethod
@@ -59,7 +58,6 @@ class TCPRemoteDeviceServer(ABC):
             conn, addr = s.accept()
 
             with conn:
-                self.conn_to_master = conn
                 self.logger.info(f"Connected to master: {addr}")
 
                 # Enter the master-slave message loop.

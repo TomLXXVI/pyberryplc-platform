@@ -7,7 +7,7 @@ from enum import StrEnum
 import random
 
 
-from pyberryplc.remote_device.remote_interface_server import TCPRemoteDeviceServer
+from pyberryplc.remote_device import TCPRemoteDeviceServer
 from pyberryplc.core import TimerOffDelay
 
 

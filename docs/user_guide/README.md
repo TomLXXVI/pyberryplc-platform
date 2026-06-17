@@ -10,10 +10,10 @@ level.
 ## Chapters
 
 1. [Building a Single-PLC Application](01_single_plc.md)
+2. [Single-PLC Application With a Remote Device](02_single_plc_remote_device.md)
 
 ## Planned Chapters
 
-2. Single-PLC application with a remote device
 3. Multiple-PLCs application
 
 Motion-control functionality is intentionally left out of this guide for now.
