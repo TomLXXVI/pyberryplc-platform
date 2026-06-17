@@ -24,6 +24,7 @@ class LoadingStationPLC(AbstractPLC):
         logger: logging.Logger,
         soft_machine_state: SoftMachineState,
     ) -> None:
+
         super().__init__(
             logger=logger,
             io_backend=SoftwareBackend(soft_machine_state),
@@ -34,18 +35,12 @@ class LoadingStationPLC(AbstractPLC):
                 clear_global_on_recover=False
             )
         )
-        self.init_flag: bool = True
 
-        # Shared memory blocks
-        self.db0 = db0
-        self.db1 = db1
+        # Remote device client
+        self.loading_station = LoadingStation(logger=self.logger)
 
         # Variables
         self._create_variables()
-
-        # Remote device clients
-        self.loading_station = LoadingStation(logger=self.logger)
-        self.loading_station_connected = False
 
         # Steps, Transitions & Actions
         self._create_steps()
@@ -54,14 +49,6 @@ class LoadingStationPLC(AbstractPLC):
 
         # Timers
         self.SimulateTask = TimerOffDelay(2)
-
-    def _connect_loading_station(self) -> None:
-        if self.loading_station_connected:
-            return
-
-        self.logger.info("Connect to remote loading station.")
-        self.loading_station.connect()
-        self.loading_station_connected = True
 
     def _create_steps(self) -> None:
         self.S10 = self.add_marker("S10", init_value=True)
@@ -76,13 +63,13 @@ class LoadingStationPLC(AbstractPLC):
 
     def _create_variables(self) -> None:
         # Shared memory
-        self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitFlag = self.db0.data["ExitFlag"]
+        self.ProductionEnable = db0.data["ProductionEnable"]
+        self.ExitFlag = db0.data["ExitFlag"]
 
-        self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
-        self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
-        self.TrayTransferDone = self.db1.data["TrayTransferDone"]
-        self.ConveyorFaultActive = self.db1.data["ConveyorFaultActive"]
+        self.RequestConveyorAccept = db1.data["RequestConveyorAccept"]
+        self.ConveyorReadyToAccept = db1.data["ConveyorReadyToAccept"]
+        self.TrayTransferDone = db1.data["TrayTransferDone"]
+        self.ConveyorFaultActive = db1.data["ConveyorFaultActive"]
 
         # Inputs
         self.LoadingStationStart = self.add_digital_input("I00", "LoadingStationStart")
@@ -191,7 +178,7 @@ class LoadingStationPLC(AbstractPLC):
             if step.rising_edge:
                 self.logger.info("S11: CheckPermissives")
 
-            self.loading_station.check_operational_state()
+                self.loading_station.check_operational_state()
 
             status, message = self.loading_station.get_response()
             match status:
@@ -205,22 +192,22 @@ class LoadingStationPLC(AbstractPLC):
         def load_tray(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S12: LoadTray")
-
                 self.loading_station.start_loading()
-                self.LoadingCycleStarted.update(True)
 
-            status, message = self.loading_station.get_response()
-            match status:
-                case Status.BUSY:
-                    self.logger.info(f"Loading station says: {message}")
+                status, message = self.loading_station.get_response()
+                match status:
+                    case Status.BUSY:
+                        self.logger.info(f"Loading station says: {message}")
+                self.LoadingCycleStarted.update(True)
 
         def wait_loaded(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S13: WaitLoaded")
+            
+            self.loading_station.get_loading_progress()
 
             self.TrayLoaded.update(False)
             self.LoadingCycleTimeout.update(False)
-            self.loading_station.get_loading_progress()
 
             status, message = self.loading_station.get_response()
             match status:
@@ -286,7 +273,8 @@ class LoadingStationPLC(AbstractPLC):
 
     def startup_routine(self) -> None:
         self.logger.info("Start Loading Station PLC")
-        self._connect_loading_station()
+        self.logger.info("Connect to remote loading station.")
+        self.loading_station.connect()
 
     def _reset(self) -> None:
         self.SimulateTask.reset()
@@ -303,14 +291,15 @@ class LoadingStationPLC(AbstractPLC):
 
     def recover_routine(self) -> None:
         super().recover_routine()
+
         self._reset()
-        # self._connect_loading_station()
+
         self.loading_station.reset()
+
         status, message = self.loading_station.get_response()
         if status == Status.ERROR:
             self.logger.error(f"Loading station reset failed: {message}")
             self.loading_station.close()
-            self.loading_station_connected = False
             self.recovery_failed(f"Loading station reset failed: {message}")
         else:
             self.logger.info(f"Loading station says: {message}")
@@ -410,7 +399,6 @@ class LoadingStationPLC(AbstractPLC):
         except Exception:
             self.logger.warning("Failure to send shutdown to loading station.")
         self.loading_station.close()
-        self.loading_station_connected = False
 
     def exit_routine(self) -> None:
         super().exit_routine()
@@ -418,6 +406,7 @@ class LoadingStationPLC(AbstractPLC):
 
     def on_emergency_enter(self) -> None:
         self.loading_station.emergency_stop()
+
         status, message = self.loading_station.get_response()
         if status == Status.ERROR:
             self.logger.error(f"Could not send emergency stop to remote device: {message}.")

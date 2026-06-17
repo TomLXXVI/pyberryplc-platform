@@ -29,11 +29,8 @@ class InfeedConveyorPLC(AbstractPLC):
                 clear_global_on_recover=False
             )
         )
-        self.db0 = db0
-        self.db1 = db1
 
         self._create_variables()
-
         self._create_steps()
         self.T = self._create_transitions()
         self.A = self._create_actions()
@@ -47,13 +44,13 @@ class InfeedConveyorPLC(AbstractPLC):
         self.S25 = self.add_marker("S25")
 
     def _create_variables(self) -> None:
-        self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitFlag = self.db0.data["ExitFlag"]
+        self.ProductionEnable = db0.data["ProductionEnable"]
+        self.ExitFlag = db0.data["ExitFlag"]
 
-        self.RequestConveyorAccept = self.db1.data["RequestConveyorAccept"]
-        self.ConveyorReadyToAccept = self.db1.data["ConveyorReadyToAccept"]
-        self.TrayTransferDone = self.db1.data["TrayTransferDone"]
-        self.ConveyorFaultActive = self.db1.data["ConveyorFaultActive"]
+        self.RequestConveyorAccept = db1.data["RequestConveyorAccept"]
+        self.ConveyorReadyToAccept = db1.data["ConveyorReadyToAccept"]
+        self.TrayTransferDone = db1.data["TrayTransferDone"]
+        self.ConveyorFaultActive = db1.data["ConveyorFaultActive"]
 
         self.ConveyorStart = self.add_digital_input("I00", "ConveyorStart")
         self.HandoffPositionFree = self.add_digital_input("I01", "HandoffPositionFree")

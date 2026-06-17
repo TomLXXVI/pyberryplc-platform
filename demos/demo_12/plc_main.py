@@ -18,13 +18,18 @@ from datablocks import db0, db1
 class MainPLC(AbstractPLC):
 
     def __init__(
-        self, 
+        self,
         main_state: SoftMachineState,
         loading_station_state: SoftMachineState,
         infeed_conveyor_state: SoftMachineState,
     ) -> None:
+
         super().__init__(
-            logger=init_logger("MAIN PLC", log_file="logs/main_plc.log", console=False),
+            logger=init_logger(
+                "MAIN PLC",
+                log_file="logs/main_plc.log",
+                console=False
+            ),
             io_backend=SoftwareBackend(main_state),
             emergency_config=EmergencyConfig(
                 emergency_pin="I07",
@@ -33,22 +38,27 @@ class MainPLC(AbstractPLC):
             )
         )
 
-        self.db0 = db0
-
         self.loading_station_plc = LoadingStationPLC(
-            logger=init_logger("LOADING STATION PLC", log_file="logs/loading_plc.log", console=False),
+            logger=init_logger(
+                "LOADING STATION PLC",
+                log_file="logs/loading_plc.log",
+                console=False
+            ),
             soft_machine_state=loading_station_state,
         )
         self.loading_station_thread = threading.Thread(target=self.loading_station_plc.run)
 
         self.infeed_conveyor_plc = InfeedConveyorPLC(
-            logger=init_logger("INFEED CONVEYOR PLC", log_file="logs/infeed_conveyor_plc.log", console=False),
+            logger=init_logger(
+                "INFEED CONVEYOR PLC",
+                log_file="logs/infeed_conveyor_plc.log",
+                console=False
+            ),
             soft_machine_state=infeed_conveyor_state,
         )
         self.infeed_conveyor_thread = threading.Thread(target=self.infeed_conveyor_plc.run)
 
         self._create_variables()
-
         self._create_steps()
         self.T = self._create_transitions()
         self.A = self._create_actions()
@@ -58,8 +68,8 @@ class MainPLC(AbstractPLC):
         self.StopButton = self.add_digital_input("I01", "StopButton")
         self.ExitButton = self.add_digital_input("I02", "ExitButton")
 
-        self.ProductionEnable = self.db0.data["ProductionEnable"]
-        self.ExitFlag = self.db0.data["ExitFlag"]
+        self.ProductionEnable = db0.data["ProductionEnable"]
+        self.ExitFlag = db0.data["ExitFlag"]
 
     def _create_steps(self) -> None:
         self.S0 = self.add_marker("S0", init_value=True)

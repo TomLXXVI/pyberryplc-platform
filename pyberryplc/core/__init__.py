@@ -5,7 +5,7 @@ This module exposes base classes and utilities for digital I/O, timers,
 counters, switches, and the main PLC execution engine.
 """
 
-from .plc_new import AbstractPLC, EmergencyConfig, PLCMode, TAbstractPLC
+from .plc import AbstractPLC, EmergencyConfig, PLCMode, TAbstractPLC
 from .memory import MemoryVariable, HMISharedData, SharedMemoryBlock
 from .io_backend import (
     BaseIOBackend, HardwareBackend, SoftwareBackend, SoftMachineState,

@@ -9,7 +9,7 @@ import socket
 from abc import ABC, abstractmethod
 
 
-def init_logger(name: str, log_dir: str, file_name: str) -> logging.Logger:
+def init_file_logger(name: str, log_dir: str, file_name: str) -> logging.Logger:
     os.makedirs(log_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y-%m-%d")
     logfile_path = Path(log_dir) / f"{file_name}_{timestamp}.log"
@@ -37,23 +37,15 @@ class TCPRemoteDeviceServer(ABC):
         self.logger = logger
 
     @abstractmethod
-    def handle_command(self, command: dict[str, str]) -> dict[str, Any]:
+    def initialize(self) -> None:
         ...
 
     @abstractmethod
-    def initialize(self) -> None:
+    def handle_command(self, command: dict[str, str]) -> dict[str, Any]:
         ...
 
     def run(self) -> None:
         self._message_loop()
-
-    def notify_master(self, message_dict: dict) -> None:
-        if self.conn_to_master:
-            try:
-                self.conn_to_master.sendall(
-                    (json.dumps(message_dict) + "\n").encode())  # `\n` indicates the end of a message.
-            except:
-                self.logger.error("Failed to send message to master.")
 
     def _message_loop(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

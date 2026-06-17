@@ -11,7 +11,6 @@ class LoadingStation(TCPRemoteDeviceClient):
         try:
             response = self.wait_for_response()
         except Exception as e:
-            # message = f"Error while waiting for response: {e}"
             message = str(e)
             return Status.ERROR, message
         else:

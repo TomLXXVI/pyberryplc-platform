@@ -143,10 +143,10 @@ class LoadingStation(TCPRemoteDeviceServer):
 
 
 def main():
-    from pyberryplc.utils.remote_interface_server import init_logger
+    from pyberryplc.utils.remote_interface_server import init_file_logger
 
     demo_dir = Path(__file__).resolve().parent
-    logger = init_logger(
+    logger = init_file_logger(
         name="LOADING STATION",
         log_dir=str(demo_dir / "logs"),
         file_name="loading_station"

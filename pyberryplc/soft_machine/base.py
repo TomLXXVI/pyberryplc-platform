@@ -129,7 +129,9 @@ class SoftMachine:
                     if self.datablocks:
                         ui.tab("Datablocks")
 
-                with ui.tab_panels(tabs, value="I/O").classes("w-full"):
+                with ui.tab_panels(tabs, value="I/O").classes(
+                    "w-full"
+                ).props("id=soft_machine_tab_panel"):
                     with ui.tab_panel("I/O"):
                         self._build_io_panel(ui)
 
@@ -313,7 +315,9 @@ class SoftMachine:
         self._log_html = ui.html(
             '<pre style="font-family: monospace; font-size: 13px; '
             'margin: 0; line-height: 1.2;"></pre>'
-        ).classes("w-full h-[calc(100vh-150px)] overflow-auto bg-white border rounded p-2")
+        ).classes(
+            "w-full overflow-auto bg-white border rounded p-2"
+        ).props("id=soft_machine_log_area")
 
     def refresh(self) -> None:
         """Refresh UI elements from the current soft-machine state."""
@@ -338,22 +342,44 @@ class SoftMachine:
         for label, mem_var in self._memory_labels:
             label.set_text(self._format_value(mem_var.state))
 
-        self._refresh_log()
+        log_updated = self._refresh_log()
+        self._sync_log_panel(scroll_to_bottom=log_updated)
 
-    def _refresh_log(self) -> None:
+    def _refresh_log(self) -> bool:
         if self.log_handler is None or self._log_html is None:
-            return
+            return False
 
         lines = self.log_handler.read()
         log_text = "\n".join(lines)
         if log_text == self._last_log_text:
-            return
+            return False
 
         self._last_log_text = log_text
         escaped_log = escape(log_text)
         self._log_html.set_content(
             '<pre style="font-family: monospace; font-size: 13px; '
             f'margin: 0; line-height: 1.2;">{escaped_log}</pre>'
+        )
+        return True
+
+    def _sync_log_panel(self, scroll_to_bottom: bool = False) -> None:
+        if self.log_handler is None or self._log_html is None:
+            return
+
+        from nicegui import ui
+
+        scroll_statement = (
+            "logArea.scrollTop = logArea.scrollHeight;"
+            if scroll_to_bottom else ""
+        )
+        ui.run_javascript(
+            "requestAnimationFrame(() => {"
+            "const tabPanel = document.getElementById('soft_machine_tab_panel');"
+            "const logArea = document.getElementById('soft_machine_log_area');"
+            "if (!tabPanel || !logArea) { return; }"
+            "logArea.style.height = `${tabPanel.getBoundingClientRect().height}px`;"
+            f"{scroll_statement}"
+            "});"
         )
 
     @staticmethod
