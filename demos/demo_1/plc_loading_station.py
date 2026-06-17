@@ -1,14 +1,13 @@
 from typing import Callable
 
 import logging
-import time
 
 from pyberryplc.core import (
     AbstractPLC,
     SoftwareBackend,
     SoftMachineState,
     MemoryVariable,
-    TimerOffDelay,
+    TimerOnDelay,
     EmergencyConfig,
 )
 
@@ -48,7 +47,8 @@ class LoadingStationPLC(AbstractPLC):
         self.A = self._create_actions()
 
         # Timers
-        self.SimulateTask = TimerOffDelay(2)
+        self.SimulateTask = TimerOnDelay(2)
+        self.ConveyorAcceptTimer = TimerOnDelay(5)
 
     def _create_steps(self) -> None:
         self.S10 = self.add_marker("S10", init_value=True)
@@ -128,7 +128,7 @@ class LoadingStationPLC(AbstractPLC):
             return self.ConveyorAcceptTimeout.active
 
         def T15_16() -> bool:
-            return True
+            return self.TrayTransferDone.active
 
         def T16_10() -> bool:
             return not self.ProductionEnable.active
@@ -177,39 +177,39 @@ class LoadingStationPLC(AbstractPLC):
         def check_permissives(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S11: CheckPermissives")
-
-                self.loading_station.check_operational_state()
-
-            status, message = self.loading_station.get_response()
-            match status:
-                case Status.READY:
-                    self.LoadingStationFaultActive.update(False)
-                    self.logger.info(f"Loading station says: {message}")
-                case Status.ERROR:
-                    self.LoadingStationFaultActive.update(True)
-                    self.logger.error(f"Loading station says: {message}")
+                status, message = self.loading_station.check_operational_state()
+                match status:
+                    case Status.READY:
+                        self.LoadingStationFaultActive.update(False)
+                        self.logger.info(f"Loading station says: {message}")
+                    case Status.ERROR:
+                        self.LoadingStationFaultActive.update(True)
+                        self.logger.error(f"Loading station says: {message}")
 
         def load_tray(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S12: LoadTray")
-                self.loading_station.start_loading()
-
-                status, message = self.loading_station.get_response()
+                self.LoadingCycleStarted.update(False)
+                status, message = self.loading_station.start_loading()
                 match status:
                     case Status.BUSY:
+                        self.LoadingCycleStarted.update(True)
                         self.logger.info(f"Loading station says: {message}")
-                self.LoadingCycleStarted.update(True)
+                    case Status.ERROR:
+                        self.LoadingStationFaultActive.update(True)
+                        self.logger.error(f"Loading station says: {message}")
+                    case _:
+                        self.LoadingStationFaultActive.update(True)
+                        self.logger.error(f"Unexpected loading station response: {message}")
 
         def wait_loaded(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S13: WaitLoaded")
-            
-            self.loading_station.get_loading_progress()
 
             self.TrayLoaded.update(False)
             self.LoadingCycleTimeout.update(False)
 
-            status, message = self.loading_station.get_response()
+            status, message = self.loading_station.get_loading_progress()
             match status:
                 case Status.DONE:
                     self.TrayLoaded.update(True)
@@ -224,32 +224,41 @@ class LoadingStationPLC(AbstractPLC):
         def offer_to_conveyor(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S14: OfferToConveyor")
+                self.ConveyorAcceptTimer.reset()
+                self.ConveyorAcceptTimeout.update(False)
 
             self.RequestConveyorAccept.update(True)
 
+            if self.ConveyorAcceptTimer.has_elapsed:
+                self.ConveyorAcceptTimeout.update(True)
+
         def tray_transfer(step: MemoryVariable) -> None:
+            # ``self.SimulateTask`` simulates tray transfer.
             if step.rising_edge:
                 self.logger.info("S15: TrayTransfer")
+                self.SimulateTask.reset()
+                self.TrayTransferDone.update(False)
 
-            while self.SimulateTask.running:
-                time.sleep(0.1)
-
-            self.SimulateTask.reset()
-            self.TrayTransferDone.update(True)
+            if self.SimulateTask.has_elapsed:
+                self.SimulateTask.reset()
+                self.TrayTransferDone.update(True)
 
         def complete(step: MemoryVariable) -> None:
+            # ``self.SimulateTask`` simulates tray registration.
             if step.rising_edge:
                 self.logger.info("S16: Complete")
+                self.SimulateTask.reset()
+                self.TrayTransferRegistered.update(False)
 
-            while self.SimulateTask.running:
-                time.sleep(0.1)
-
-            self.SimulateTask.reset()
-            self.TrayTransferRegistered.update(True)
+            if self.SimulateTask.has_elapsed and not self.ConveyorReadyToAccept.active:
+                self.SimulateTask.reset()
+                self.TrayTransferDone.update(False)
+                self.TrayTransferRegistered.update(True)
 
         def blocked(step: MemoryVariable) -> None:
             if step.rising_edge:
                 self.logger.info("S17: Blocked")
+                self.ConveyorAcceptTimer.reset()
 
             self.ConveyorAcceptTimeout.update(False)
 
@@ -278,6 +287,7 @@ class LoadingStationPLC(AbstractPLC):
 
     def _reset(self) -> None:
         self.SimulateTask.reset()
+        self.ConveyorAcceptTimer.reset()
         self.RequestConveyorAccept.update(False)
         self.TrayTransferDone.update(False)
         self.LoadingStationBusy.update(False)
@@ -294,9 +304,7 @@ class LoadingStationPLC(AbstractPLC):
 
         self._reset()
 
-        self.loading_station.reset()
-
-        status, message = self.loading_station.get_response()
+        status, message = self.loading_station.reset()
         if status == Status.ERROR:
             self.logger.error(f"Loading station reset failed: {message}")
             self.loading_station.close()
@@ -395,7 +403,11 @@ class LoadingStationPLC(AbstractPLC):
 
     def _shutdown_loading_station(self) -> None:
         try:
-            self.loading_station.shutdown()
+            status, message = self.loading_station.shutdown()
+            if status == Status.ERROR:
+                self.logger.warning(f"Loading station shutdown failed: {message}")
+            else:
+                self.logger.info(f"Loading station says: {message}")
         except Exception:
             self.logger.warning("Failure to send shutdown to loading station.")
         self.loading_station.close()
@@ -405,9 +417,9 @@ class LoadingStationPLC(AbstractPLC):
         self._shutdown_loading_station()
 
     def on_emergency_enter(self) -> None:
-        self.loading_station.emergency_stop()
+        super().on_emergency_enter()
 
-        status, message = self.loading_station.get_response()
+        status, message = self.loading_station.emergency_stop()
         if status == Status.ERROR:
             self.logger.error(f"Could not send emergency stop to remote device: {message}.")
         else:

@@ -7,37 +7,31 @@ from remote_loading_station import Command, Status
 
 class LoadingStation(TCPRemoteDeviceClient):
 
-    def get_response(self) -> tuple[str, str]:
-        try:
-            response = self.wait_for_response()
-        except Exception as e:
-            message = str(e)
-            return Status.ERROR, message
-        else:
-            status = str(response.get("status"))
-            message = str(response.get("message"))
-            return status, message
-
-    def send_command(self, command: Command) -> None:
+    def _request(self, command: Command) -> tuple[str, str]:
         try:
             super().send_command({"command": command})
+            response = self.wait_for_response()
         except Exception as e:
-            self._log(f"Sending of command failed: {e}", level=logging.ERROR)
+            return Status.ERROR, str(e)
 
-    def check_operational_state(self) -> None:
-        self.send_command(Command.CHECK_OPERATIONAL_STATE)
+        status = str(response.get("status"))
+        message = str(response.get("message"))
+        return status, message
 
-    def start_loading(self) -> None:
-        self.send_command(Command.START_LOADING)
+    def check_operational_state(self) -> tuple[str, str]:
+        return self._request(Command.CHECK_OPERATIONAL_STATE)
 
-    def get_loading_progress(self) -> None:
-        self.send_command(Command.GET_LOADING_PROGRESS)
+    def start_loading(self) -> tuple[str, str]:
+        return self._request(Command.START_LOADING)
 
-    def emergency_stop(self) -> None:
-        self.send_command(Command.EMERGENCY_STOP)
+    def get_loading_progress(self) -> tuple[str, str]:
+        return self._request(Command.GET_LOADING_PROGRESS)
 
-    def reset(self) -> None:
-        self.send_command(Command.RESET)
+    def emergency_stop(self) -> tuple[str, str]:
+        return self._request(Command.EMERGENCY_STOP)
 
-    def shutdown(self) -> None:
-        self.send_command(Command.SHUTDOWN)
+    def reset(self) -> tuple[str, str]:
+        return self._request(Command.RESET)
+
+    def shutdown(self) -> tuple[str, str]:
+        return self._request(Command.SHUTDOWN)

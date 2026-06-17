@@ -198,7 +198,6 @@ class InfeedConveyorPLC(AbstractPLC):
             self.S24.deactivate()
             self.S21.activate()
             self.ConveyorReadyToAccept.update(False)
-            self.TrayTransferDone.update(False)
 
         elif self.S25.active and self.T["T25_20"]():
             self.S25.deactivate()

@@ -46,7 +46,10 @@ class MainPLC(AbstractPLC):
             ),
             soft_machine_state=loading_station_state,
         )
-        self.loading_station_thread = threading.Thread(target=self.loading_station_plc.run)
+        self.loading_station_thread = threading.Thread(
+            target=self.loading_station_plc.run,
+            daemon=True,
+        )
 
         self.infeed_conveyor_plc = InfeedConveyorPLC(
             logger=init_logger(
@@ -56,7 +59,10 @@ class MainPLC(AbstractPLC):
             ),
             soft_machine_state=infeed_conveyor_state,
         )
-        self.infeed_conveyor_thread = threading.Thread(target=self.infeed_conveyor_plc.run)
+        self.infeed_conveyor_thread = threading.Thread(
+            target=self.infeed_conveyor_plc.run,
+            daemon=True,
+        )
 
         self._create_variables()
         self._create_steps()
@@ -130,19 +136,28 @@ class MainPLC(AbstractPLC):
         elif self.S1.active:
             self.A["S1"](self.S1)
 
+    def request_exit(self) -> None:
+        self.ExitFlag.update(True)
+        self.exit()
+
     def control_routine(self) -> None:
         if self.ExitButton.active:
             self.logger.info("Received ExitButton. Closing down the system.")
-            self.ExitFlag.update(True)
-            self.exit()
+            self.request_exit()
 
         self._sequence_control()
         self._execute_actions()
 
     def exit_routine(self) -> None:
         super().exit_routine()
-        self.loading_station_thread.join()
-        self.infeed_conveyor_thread.join()
+        self.ExitFlag.update(True)
+        self.loading_station_thread.join(timeout=2.0)
+        self.infeed_conveyor_thread.join(timeout=2.0)
+
+        if self.loading_station_thread.is_alive():
+            self.logger.warning("Loading station PLC did not stop within the shutdown timeout.")
+        if self.infeed_conveyor_thread.is_alive():
+            self.logger.warning("Infeed conveyor PLC did not stop within the shutdown timeout.")
 
     def on_emergency_enter(self) -> None:
         self.loading_station_thread.join(timeout=1.0)
@@ -198,7 +213,7 @@ def main():
             "loading_station": main_plc.loading_station_plc.logger,
             "infeed": main_plc.infeed_conveyor_plc.logger,
         },
-        on_exit=main_plc.exit
+        on_exit=main_plc.request_exit
     )
     soft_machine.run()
 
