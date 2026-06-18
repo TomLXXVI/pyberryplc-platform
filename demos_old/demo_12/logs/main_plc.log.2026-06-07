@@ -1,0 +1,20 @@
+2026-06-07 15:11:27.371904 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 15:11:27.373906 [MAIN PLC] [ERROR] Unexpected exception occurred — invoking crash routine.
+2026-06-07 15:13:35.778347 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 15:13:35.780358 [MAIN PLC] [ERROR] Unexpected exception occurred — invoking crash routine.
+2026-06-07 15:18:02.381679 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 15:18:02.383671 [MAIN PLC] [ERROR] Unexpected exception occurred — invoking crash routine.
+2026-06-07 15:18:02.383671 [MAIN PLC] [CRITICAL] MainPLC._create_actions.<locals>.idle() missing 1 required positional argument: 'step'
+2026-06-07 15:19:39.306082 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 15:19:39.307073 [MAIN PLC] [INFO] S0: Idle
+2026-06-07 15:20:28.206096 [MAIN PLC] [INFO] S1: Ready
+2026-06-07 16:13:51.077696 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 16:13:51.078696 [MAIN PLC] [INFO] S0: Idle
+2026-06-07 16:14:33.778192 [MAIN PLC] [INFO] S1: Ready
+2026-06-07 16:25:45.919643 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 16:25:45.920651 [MAIN PLC] [INFO] S0: Idle
+2026-06-07 16:26:16.120351 [MAIN PLC] [INFO] S1: Ready
+2026-06-07 17:22:25.819438 [MAIN PLC] [INFO] Init main PLC
+2026-06-07 17:22:25.820440 [MAIN PLC] [INFO] S0: Idle
+2026-06-07 17:23:10.219589 [MAIN PLC] [INFO] S1: Ready
+2026-06-07 17:26:15.720113 [MAIN PLC] [INFO] Exiting PLC program — invoking exit routine.

@@ -1,0 +1,25 @@
+# sftp.toml
+host = "raspberrypi.local"
+port = 22
+user = "tom-chr"
+dest_dir = "/shared/python-projects/pyberryplc-platform/demos/demo_10/rpi_side/trajectory_outputs"
+remote_motor_config_path = "/shared/python-projects/pyberryplc-platform/demos/demo_10/rpi_side/motor_config.toml"
+
+# Choose one of the two auth methods: "key" or "password"
+auth = "password"
+
+# KEY-METHOD
+key_file = "/home/you/.ssh/id_rsa"   # or id_ed25519
+key_passphrase = ""                  # leave empty if no passphrase
+
+# PASSWORD-METHOD
+password = "unipi.plc"               # leave empty when using key-method
+
+# Optional
+connect_timeout = 10
+operation_timeout = 30
+known_hosts = ""     # e.g. "/home/you/.ssh/known_hosts", empty = auto-add policy
+
+# Upload behavior
+atomic_put = true    # write as temp + rename
+mkdir_mode = 493     # 0o755 in decimal

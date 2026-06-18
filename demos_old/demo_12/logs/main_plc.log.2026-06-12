@@ -1,0 +1,40 @@
+2026-06-12 07:41:09.666803 [MAIN PLC] [INFO] Start Main PLC
+2026-06-12 07:42:21.567292 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 07:43:28.367594 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 07:43:44.517356 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 07:43:44.518425 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 07:47:21.167265 [MAIN PLC] [INFO] Received ExitButton. Closing down the system.
+2026-06-12 07:47:21.266977 [MAIN PLC] [INFO] Exiting PLC program - invoking exit routine.
+2026-06-12 08:03:28.985906 [MAIN PLC] [INFO] Start Main PLC
+2026-06-12 08:03:47.487366 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 08:05:12.086855 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 08:06:02.482349 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 08:06:02.482349 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 08:07:10.787248 [MAIN PLC] [INFO] Exiting PLC program - invoking exit routine.
+2026-06-12 09:12:39.506527 [MAIN PLC] [INFO] Start Main PLC
+2026-06-12 09:12:57.606609 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 09:13:15.707753 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 09:13:32.606358 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 09:13:32.608360 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 09:13:32.706563 [MAIN PLC] [INFO] S0: Disabled
+2026-06-12 09:14:37.106194 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 09:15:46.906024 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 09:16:05.506345 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 09:16:05.508350 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 09:16:05.607956 [MAIN PLC] [INFO] S0: Disabled
+2026-06-12 09:17:59.405974 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 09:21:29.006917 [MAIN PLC] [INFO] Received ExitButton. Closing down the system.
+2026-06-12 09:21:29.106611 [MAIN PLC] [INFO] Exiting PLC program - invoking exit routine.
+2026-06-12 09:37:45.027352 [MAIN PLC] [INFO] Start Main PLC
+2026-06-12 09:38:03.527431 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 09:38:44.926564 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 09:39:40.426933 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 09:39:40.428926 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 09:39:40.527198 [MAIN PLC] [INFO] S0: Disabled
+2026-06-12 09:40:22.426817 [MAIN PLC] [INFO] S1: Enabled
+2026-06-12 09:41:18.227393 [MAIN PLC] [CRITICAL] Switching to EMERGENCY mode: Emergency condition active.
+2026-06-12 09:41:30.726070 [MAIN PLC] [INFO] Reset received. Recovering from Emergency...
+2026-06-12 09:41:30.728045 [MAIN PLC] [INFO] PLC successfully recovered to RUNNING mode.
+2026-06-12 09:41:30.827460 [MAIN PLC] [INFO] S0: Disabled
+2026-06-12 09:41:35.626836 [MAIN PLC] [INFO] Received ExitButton. Closing down the system.
+2026-06-12 09:41:35.727165 [MAIN PLC] [INFO] Exiting PLC program - invoking exit routine.
