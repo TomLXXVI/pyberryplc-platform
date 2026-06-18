@@ -1,7 +1,5 @@
 .venv/
 /notes/
-/R&D/
-/demos/demo_10/pc_side/sftp.toml
 .idea/
 /pyberryplc.egg-info/
 __pycache__/
@@ -11,3 +9,5 @@ __pycache__/
 *.json
 *.dxf
 */logs/
+/R&D_windows/
+/R&D_rpi/
