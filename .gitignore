@@ -9,5 +9,4 @@ __pycache__/
 *.pyc
 .env
 *.json
-*.pdf
 *.dxf
