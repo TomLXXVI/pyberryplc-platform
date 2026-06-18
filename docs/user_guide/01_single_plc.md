@@ -241,8 +241,7 @@ provide useful helpers:
 ## The PLC Scan Cycle
 
 A PLC application is not an event-driven script. It is a cyclic program.
-`AbstractPLC.run()` repeats the same scan sequence until `exit()` is requested
-or an unrecoverable fault occurs.
+`AbstractPLC.run()` repeats the same scan sequence until the exit procedure is triggered by calling `exit()` from the PLC program or when an unrecoverable fault occurs.
 
 This scan-based structure is important: user code does not normally wait for a
 button event or directly write to a GPIO pin. Instead, each scan reads the
@@ -478,7 +477,8 @@ class LampPLC(AbstractPLC):
         self.logger.info("Starting Lamp PLC.")
 
     def control_routine(self) -> None:
-        # A rising edge makes the exit button act as a momentary command.
+        # The exit button is continuously polled (each scan cycle).
+        # A rising edge on the exit button triggers the exit procedure.
         if self.ExitButton.rising_edge:
             self.logger.info("Exit requested.")
             self.exit()

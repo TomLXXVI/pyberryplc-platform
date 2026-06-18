@@ -23,7 +23,7 @@ class MainPLC(AbstractPLC):
         loading_station_state: SoftMachineState,
         infeed_conveyor_state: SoftMachineState,
     ) -> None:
-
+        # Setup main PLC
         super().__init__(
             logger=init_logger(
                 "MAIN PLC",
@@ -38,6 +38,7 @@ class MainPLC(AbstractPLC):
             )
         )
 
+        # Set up loading station PLC to run in a separate thread.
         self.loading_station_plc = LoadingStationPLC(
             logger=init_logger(
                 "LOADING STATION PLC",
@@ -51,6 +52,7 @@ class MainPLC(AbstractPLC):
             daemon=True,
         )
 
+        # Set up infeed conveyor PLC to run in a separate thread.
         self.infeed_conveyor_plc = InfeedConveyorPLC(
             logger=init_logger(
                 "INFEED CONVEYOR PLC",
@@ -64,6 +66,7 @@ class MainPLC(AbstractPLC):
             daemon=True,
         )
 
+        # Setup main PLC program.
         self._create_variables()
         self._create_steps()
         self.T = self._create_transitions()
@@ -115,12 +118,15 @@ class MainPLC(AbstractPLC):
 
     def startup_routine(self) -> None:
         self.logger.info("Start Main PLC")
-        self.loading_station_thread.start()
-        self.infeed_conveyor_thread.start()
+        self.loading_station_thread.start()   # start loading station PLC
+        self.infeed_conveyor_thread.start()   # start infeed conveyor PLC
+
+    def _reset(self) -> None:
+        self.ProductionEnable.update(False)
 
     def recover_routine(self) -> None:
         super().recover_routine()
-        self.ProductionEnable.update(False)
+        self._reset()
 
     def _sequence_control(self) -> None:
         if self.S0.active and self.T["T0_1"]():
@@ -137,20 +143,25 @@ class MainPLC(AbstractPLC):
             self.A["S1"](self.S1)
 
     def request_exit(self) -> None:
-        self.ExitFlag.update(True)
-        self.exit()
+        self.ExitFlag.update(True)  # Signals exit request to loading station and infeed conveyor PLC.
+        self.exit()  # Terminates the scan cycle of this main PLC.
 
     def control_routine(self) -> None:
+        # The exit button is continuously polled (each scan cycle).
         if self.ExitButton.active:
             self.logger.info("Received ExitButton. Closing down the system.")
             self.request_exit()
 
+        # Execute PLC-program (PLC in normal running mode).
         self._sequence_control()
         self._execute_actions()
 
     def exit_routine(self) -> None:
+        # The exit procedure is triggered from inside `control_routine()`.
         super().exit_routine()
         self.ExitFlag.update(True)
+
+        # Wait for the loading station PLC and infeed conveyor PLC to exit.
         self.loading_station_thread.join(timeout=2.0)
         self.infeed_conveyor_thread.join(timeout=2.0)
 
@@ -163,24 +174,15 @@ class MainPLC(AbstractPLC):
         self.loading_station_thread.join(timeout=1.0)
         self.infeed_conveyor_thread.join(timeout=1.0)
 
-    def emergency_routine(self) -> None:
-        super().emergency_routine()
-
-    def crash_routine(self, exception: Exception | KeyboardInterrupt) -> None:
-        super().crash_routine(exception)
-        raise exception
-
+# ==============================================================================
 
 def main():
     import os
     import subprocess
     import sys
     from pyberryplc.soft_machine import SoftMachine
-    
-    main_state = SoftMachineState()
-    loading_station_state = SoftMachineState()
-    infeed_conveyor_state = SoftMachineState()
 
+    # Run the remote loading station script inside a separate OS subprocess.
     project_path = os.path.dirname(os.path.abspath(__file__))
     loading_station_script = os.path.join(project_path, "remote_loading_station.py")
     subprocess.Popen(
@@ -193,6 +195,11 @@ def main():
         ),
     )
 
+    # Set up the PLC system and start it in a separate child thread.
+    main_state = SoftMachineState()
+    loading_station_state = SoftMachineState()
+    infeed_conveyor_state = SoftMachineState()
+
     main_plc = MainPLC(
         main_state,
         loading_station_state, 
@@ -200,7 +207,9 @@ def main():
     )
     main_plc_thread = threading.Thread(target=main_plc.run, daemon=True)
     main_plc_thread.start()
-    
+
+    # Set up the soft-machine GUI for simulation and run it (in this main
+    # thread).
     soft_machine = SoftMachine(
         states={
             "main": main_state,

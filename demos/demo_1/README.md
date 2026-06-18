@@ -7,12 +7,12 @@ guide:
 - chapter 2: communication with a remote device;
 - chapter 3: multiple PLC units coordinated through shared datablocks.
 
-The application is a simulated loading cell. A main PLC enables production, a
-loading-station PLC asks a remote loading station to load a tray, and an infeed
-conveyor PLC accepts the loaded tray through a small handshake.
+The application is a simulated loading cell. A main PLC unit enables production, a
+loading-station PLC unit asks a remote loading station to load a tray, and an infeed
+conveyor PLC unit accepts the loaded tray through a small handshake.
 
 The goal of the demo is not to model a complete machine. It is meant to show
-how the building blocks of a larger PyBerryPLC application fit together.
+how the building blocks of a larger PyBerryPLC application can be fit together.
 
 ## Files
 
@@ -38,31 +38,11 @@ demos/demo_1/
 
 ## Architecture
 
-The demo contains three PLC units and one remote device.
-
-```text
-SoftMachine UI
-    |
-    +-- MainPLC
-    |     |
-    |     +-- shared DB0: production, exit, global emergency
-    |
-    +-- LoadingStationPLC
-    |     |
-    |     +-- TCP client
-    |     |     |
-    |     |     +-- remote_loading_station.py
-    |     |
-    |     +-- shared DB1: conveyor request / ready / done handshake
-    |
-    +-- InfeedConveyorPLC
-          |
-          +-- shared DB1
-```
-
-Each PLC has its own `SoftMachineState` and runs its own PLC scan loop in a
+The demo contains three PLC units and one remote device. Each PLC has its own `SoftMachineState` and runs its own PLC scan loop in a
 separate thread. The remote loading station is deliberately not part of the PLC
 scan loop. It runs as a separate process and communicates over TCP.
+
+![architecture.png](./static/architecture.png)
 
 This separation is important:
 
@@ -96,7 +76,7 @@ The demo follows the "one writer, one or more readers" rule from chapter 3 of
 the user guide. Shared variables are used as level signals, not as per-PLC edge
 events.
 
-## Sequence Overview
+## [Sequential Function Chart (Grafcet)](grafcet\sfc_demo_1.pdf)
 
 ### MainPLC
 
