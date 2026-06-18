@@ -1,6 +1,0 @@
-[LOADING STATION 18-06-2026 10:45:00 | INFO] Slave listening on localhost:65432...
-[LOADING STATION 18-06-2026 10:45:01 | INFO] Connected to master: ('127.0.0.1', 60417)
-[LOADING STATION 18-06-2026 10:50:49 | WARNING] Shutdown received. Closing connection.
-[LOADING STATION 18-06-2026 16:01:15 | INFO] Slave listening on localhost:65432...
-[LOADING STATION 18-06-2026 16:01:16 | INFO] Connected to master: ('127.0.0.1', 52436)
-[LOADING STATION 18-06-2026 17:22:46 | WARNING] Shutdown received. Closing connection.
