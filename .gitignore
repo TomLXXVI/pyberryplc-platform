@@ -8,6 +8,6 @@ __pycache__/
 .env
 *.json
 *.dxf
-*/logs/
+**/logs/
 /R&D_windows/
 /R&D_rpi/

@@ -140,10 +140,7 @@ class LoadingStationPLC(AbstractPLC):
             )
 
         def T17_14() -> bool:
-            return (
-                self.ConveyorReadyToAccept.active
-                and not self.ConveyorFaultActive.active
-            )
+            return not self.ConveyorFaultActive.active
 
         def T17_18() -> bool:
             return self.ConveyorFaultActive.active
