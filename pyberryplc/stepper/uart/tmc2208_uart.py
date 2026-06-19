@@ -66,7 +66,7 @@ class TMC2208UART:
         Opens the serial port if it is not already open.
         """
         if not self.serial or not self.serial.is_open:
-            self.serial = serial.Serial(
+            self.serial = serial.Serial(  #type: ignore
                 port=self.port,
                 baudrate=self.baudrate,
                 timeout=self.timeout
@@ -80,7 +80,7 @@ class TMC2208UART:
             self.serial.close()
 
     def __enter__(self) -> "TMC2208UART":
-        self.serial = serial.Serial(
+        self.serial = serial.Serial(  #type: ignore
             port=self.port,
             baudrate=self.baudrate,
             timeout=self.timeout
@@ -111,11 +111,12 @@ class TMC2208UART:
         if not self.serial or not self.serial.is_open:
             raise IOError("Serial port is not open.")
 
+        # noinspection PyListCreation
         request = [0x05, self.slave_address, reg_addr & 0x7F]
-        request.append(self._calculate_crc(request))
+        request.append(self._calculate_crc(request))  #type: ignore
 
         self.serial.reset_input_buffer()
-        self.serial.write(bytes(request))
+        self.serial.write(bytes(request))  #type: ignore
         self.serial.flush()
 
         timeout = time.time() + 0.1  # wait max 100 ms
@@ -185,10 +186,10 @@ class TMC2208UART:
             (value >> 8) & 0xFF,     # Data byte 3
             value & 0xFF             # Data byte 4 (LSB)
         ]
-        crc = self._calculate_crc(datagram)
+        crc = self._calculate_crc(datagram)  #type: ignore
         datagram.append(crc)
 
-        self.serial.write(bytes(datagram))
+        self.serial.write(bytes(datagram))  #type: ignore
         self.serial.flush()
 
     def update_register_addr(self, reg_addr: int, mask: int, value: int) -> None:

@@ -6,6 +6,8 @@ Provides access to all stepper motor classes and configuration tools.
 from .driver import *
 from .controller import *
 from .uart.tmc2208_uart import TMC2208UART
+from .misc import *
+
 
 __all__ = [
     "StepperMotor",
@@ -22,5 +24,6 @@ __all__ = [
     "TStepperMotor",
     "MotorController",
     "XYZMotionController",
-    "DynamicDelayGenerator"
+    "DynamicDelayGenerator",
+    "RotationDirection"
 ]

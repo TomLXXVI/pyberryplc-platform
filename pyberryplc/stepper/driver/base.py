@@ -7,7 +7,7 @@ import logging
 import threading
 from collections import deque
 
-from pyberryplc.core import DigitalOutput, DigitalOutputPigpio
+from pyberryplc.core.gpio import DigitalOutput, DigitalOutputPigpio
 from pyberryplc.stepper.driver.dynamic_generator import DynamicDelayGenerator
 
 from pyberryplc.motion import MotionProfile, RotationDirection
@@ -31,13 +31,13 @@ class Rotator(ABC):
         """
         self.motor = motor
         self._step_width = 20e-6  # default step pulse width in seconds
-        self._direction: RotationDirection | None = None
+        self._direction: RotationDirection = RotationDirection.CCW
         self._busy = False
         self._start_time: float = 0.0
         self._end_time: float = 0.0
     
     @property
-    def direction(self) -> RotationDirection:
+    def direction(self) -> RotationDirection | None:
         """
         Returns the current rotation direction setting.
         """
@@ -210,7 +210,7 @@ class FixedRotatorThreaded(NonBlockingRotator):
         self._queue: deque[float] = deque()
  
     @property
-    def angle(self) -> float:
+    def angle(self) -> float | None:
         """
         Returns the current rotation angle setting.
         """
@@ -226,7 +226,7 @@ class FixedRotatorThreaded(NonBlockingRotator):
         self._angle = value
 
     @property
-    def omega(self) -> float:
+    def omega(self) -> float | None:
         """
         Returns the current angular speed setting.
         """
@@ -245,9 +245,10 @@ class FixedRotatorThreaded(NonBlockingRotator):
         """
         Creates a queue with the time delays between successive step pulses. 
         """
-        steps = int(self._angle * self.motor.steps_per_degree)
-        delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self._step_width
-        self._queue = deque([delay] * steps)
+        if self._angle is not None and self._omega is not None:
+            steps = int(self._angle * self.motor.steps_per_degree)
+            delay = 1.0 / (self._omega * self.motor.steps_per_degree) - self._step_width
+            self._queue = deque([delay] * steps)
 
     def _step_loop(self) -> None:
         """
@@ -274,7 +275,8 @@ class FixedRotatorThreaded(NonBlockingRotator):
             raise ValueError("Angle and speed must be set before starting.")
         self._generate_delays()
         self._thread = threading.Thread(target=self._step_loop, daemon=True)
-        self._thread.start()
+        if self._thread is not None:
+            self._thread.start()
 
 
 class MotionProfileRotator(Rotator):
@@ -287,7 +289,7 @@ class MotionProfileRotator(Rotator):
         self._delays: list[float] = []
 
     @property
-    def profile(self) -> MotionProfile:
+    def profile(self) -> MotionProfile | None:
         """
         Returns the current motion profile setting.
         """
@@ -296,7 +298,7 @@ class MotionProfileRotator(Rotator):
     @profile.setter
     def profile(self, value: MotionProfile) -> None:
         """
-        Sets the motion profile for the rotation to be excuted.
+        Sets the motion profile for the rotation to be executed.
         """
         self._motion_profile = value
     
@@ -304,7 +306,7 @@ class MotionProfileRotator(Rotator):
         """
         Creates a list with the time delays between successive step pulses. 
         """
-        if self._motion_profile.ds_tot > 0.0:
+        if self._motion_profile is not None and self._motion_profile.ds_tot > 0.0:
             num_steps = int(round(self._motion_profile.ds_tot / self.motor.step_angle))
             s_arr = [
                 self._motion_profile.s_i + i * self.motor.step_angle
@@ -379,7 +381,7 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
         self._queue: deque[float] = deque()
 
     @property
-    def profile(self) -> MotionProfile:
+    def profile(self) -> MotionProfile | None:
         """
         Returns the current motion profile setting.
         """
@@ -388,7 +390,7 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
     @profile.setter
     def profile(self, value: MotionProfile) -> None:
         """
-        Sets the motion profile for the rotation to be excuted.
+        Sets the motion profile for the rotation to be executed.
         """
         self._motion_profile = value
 
@@ -396,7 +398,7 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
         """
         Creates a queue with the time delays between successive step pulses. 
         """
-        if self._motion_profile.ds_tot > 0.0:
+        if self._motion_profile is not None and self._motion_profile.ds_tot > 0.0:
             step_angle = self.motor.step_angle
             final_angle = self._motion_profile.ds_tot   # + step_angle
             num_steps = int(round(final_angle / step_angle))
@@ -437,7 +439,8 @@ class MotionProfileRotatorThreaded(NonBlockingRotator):
             target=self._step_loop,
             daemon=True
         )
-        self._thread.start()
+        if self._thread is not None:
+            self._thread.start()
 
 
 class TwoStageMotionProfileRotator(MotionProfileRotator):
@@ -496,7 +499,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         self._next_step_time = 0.0
 
     @property
-    def profile(self) -> MotionProfile:
+    def profile(self) -> MotionProfile | None:
         """
         Returns the current motion profile setting.
         """
@@ -530,7 +533,7 @@ class DynamicRotatorThreaded(NonBlockingRotator):
             if remaining <= 0.0:
                 try:
                     self._pulse_step_pin()
-                    delay = self._generator.next_delay()
+                    delay = self._generator.next_delay() if self._generator else 0
                     # schedule from "now" to avoid backlogs after oversleep
                     self._next_step_time = time.perf_counter() + delay
                 except StopIteration:
@@ -558,14 +561,16 @@ class DynamicRotatorThreaded(NonBlockingRotator):
         self._next_step_time = time.perf_counter()
         self._start_time = time.perf_counter()
         self._thread = threading.Thread(target=self._step_loop, daemon=True)
-        self._thread.start()
+        if self._thread is not None:
+            self._thread.start()
 
     def stop(self) -> None:
         """
         Sends the signal to stop the motor.
         """
-        self._generator.trigger_decel()
-        self._end_time = time.perf_counter()
+        if self._generator is not None:
+            self._generator.trigger_decel()
+            self._end_time = time.perf_counter()
         
 
 class RotatorType(StrEnum):
@@ -852,7 +857,7 @@ class StepperMotor(typing.Generic[TRotator], ABC):
             Desired microstep resolution (e.g., "full", "1/8", "1/16").
         ms_pins : MicrostepPinConfig, optional
             GPIO pin configuration for MS1, MS2, and MS3. Defaults to None.
-        full_steps_per_rev : int, optional
+        full_steps_per_rev : int, default = 200
             Full steps per revolution of the motor. If provided, this will 
             override the current setting. Defaults to 200.
 

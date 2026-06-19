@@ -47,11 +47,11 @@ class TMC2208StepperMotor(StepperMotor):
         ----------
         pin_config : PinConfig
             Configuration for essential GPIO pins of the stepper motor driver.
-        logger : logging.Logger
-            Logger for analysis and diagnosis of the stepper motor driver 
+        logger : logging.Logger, optional
+            For analysis and diagnosis of the stepper motor driver
             operation.
-        name : str, optional
-            Name to identify the stepper motor driver.
+        name : str
+            Optional name to identify the stepper motor driver. Defaults to "".
         uart : TMC2208UART, optional
             UART interface for register-level control of the driver.
         """
@@ -74,7 +74,7 @@ class TMC2208StepperMotor(StepperMotor):
             GPIO pin configuration for MS1, MS2, and MS3. Defaults to None.
             If None, microstepping is configured via UART. If UART is enabled,
             configuration of microstepping via UART takes precedence over GPIO. 
-        full_steps_per_rev : int, optional
+        full_steps_per_rev : int, default = 200
             Full steps per revolution of the motor. If provided, this will 
             override the current setting. Defaults to 200.
 
@@ -101,23 +101,24 @@ class TMC2208StepperMotor(StepperMotor):
         full_steps_per_rev: int
     ) -> None:
         """Configures microstepping on the TMC2208 driver via GPIO."""
-        super().configure_microstepping(resolution, ms_pins, full_steps_per_rev)
-        ms1 = self.microstep_config.pin_config.ms1
-        ms2 = self.microstep_config.pin_config.ms2
-        mres = self.microstep_config.resolution
-        if ms1 and ms2:
-            ms1_val, ms2_val = self.MICROSTEP_GPIO_CFG[mres]
-            ms1.write(ms1_val)
-            ms2.write(ms2_val)
-            self.logger.info(
-                f"[{self.name}] Microstepping set to {mres} "
-                f"(MS1={ms1_val}, MS2={ms2_val})"
-            )
-        else:
-            self.logger.warning(
-                f"[{self.name}] MS1/MS2 pins not configured, "
-                f"skipping microstepping setup"
-            )
+        if self.microstep_config is not None:
+            super().configure_microstepping(resolution, ms_pins, full_steps_per_rev)
+            ms1 = self.microstep_config.pin_config.ms1
+            ms2 = self.microstep_config.pin_config.ms2
+            mres = self.microstep_config.resolution or "full"
+            if ms1 and ms2:
+                ms1_val, ms2_val = self.MICROSTEP_GPIO_CFG[mres]
+                ms1.write(ms1_val)
+                ms2.write(ms2_val)
+                self.logger.info(
+                    f"[{self.name}] Microstepping set to {mres} "
+                    f"(MS1={ms1_val}, MS2={ms2_val})"
+                )
+            else:
+                self.logger.warning(
+                    f"[{self.name}] MS1/MS2 pins not configured, "
+                    f"skipping microstepping setup"
+                )
     
     def _configure_uart_microstepping(
         self,
@@ -126,12 +127,13 @@ class TMC2208StepperMotor(StepperMotor):
     ) -> None:
         """Configures microstepping on the TMC2208 driver via UART."""
         super().configure_microstepping(resolution, None, full_steps_per_rev)
-        mres = self.MICROSTEP_UART_CFG[self.microstep_config.resolution]
-        self.uart.update_register("CHOPCONF", {"mres": mres})
-        self.logger.info(
-            f"[{self.name}] Setting microstepping via UART: "
-            f"{self.microstep_config.resolution} (mres = {mres})"
-        )
+        if self.microstep_config is not None and self.uart is not None:
+            mres = self.MICROSTEP_UART_CFG[self.microstep_config.resolution or "full"]
+            self.uart.update_register("CHOPCONF", {"mres": mres})
+            self.logger.info(
+                f"[{self.name}] Setting microstepping via UART: "
+                f"{self.microstep_config.resolution} (mres = {mres})"
+            )
     
     def enable(self, high_sensitivity: bool = False) -> None:
         """
@@ -161,23 +163,24 @@ class TMC2208StepperMotor(StepperMotor):
             super().enable()
     
     def _enable_via_uart(self, high_sensitivity) -> None:
-        self.uart.open()
-        time.sleep(0.005)
-        self.uart.update_register(
-            reg_name="GCONF",
-            fields={
-                "pdn_disable": True,      # PDN_UART input function disabled. 
-                "mstep_reg_select": True  # microstep resolution selected by MSTEP register
-            }
-        )
-        time.sleep(0.005)
-        self.uart.update_register(
-            reg_name="CHOPCONF",
-            fields={
-                "toff": 3,  # Enable driver - off time setting controls duration of slow decay phase
-                "vsense": high_sensitivity
-            }
-        )
+        if self.uart is not None:
+            self.uart.open()
+            time.sleep(0.005)
+            self.uart.update_register(
+                reg_name="GCONF",
+                fields={
+                    "pdn_disable": True,      # PDN_UART input function disabled.
+                    "mstep_reg_select": True  # microstep resolution selected by MSTEP register
+                }
+            )
+            time.sleep(0.005)
+            self.uart.update_register(
+                reg_name="CHOPCONF",
+                fields={
+                    "toff": 3,  # Enable driver - off time setting controls duration of slow decay phase
+                    "vsense": high_sensitivity
+                }
+            )
 
     def disable(self) -> None:
         """
@@ -194,11 +197,12 @@ class TMC2208StepperMotor(StepperMotor):
             super().disable()
     
     def _disable_via_uart(self) -> None:
-        self.uart.update_register(
-            reg_name="CHOPCONF",
-            fields={"toff": 0}  # Driver disable, all bridges off, motor is freewheeling.
-        )
-        self.uart.close()
+        if self.uart is not None:
+            self.uart.update_register(
+                reg_name="CHOPCONF",
+                fields={"toff": 0}  # Driver disable, all bridges off, motor is freewheeling.
+            )
+            self.uart.close()
         
     def set_current_via_uart(
         self,
