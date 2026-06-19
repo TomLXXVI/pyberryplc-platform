@@ -69,6 +69,14 @@ class EmergencyConfig:
     clear_global_on_recover:
         If ``True``, successful recovery writes ``False`` to
         ``global_emergency``.
+    emergency_input:
+        Optional existing memory variable used as local emergency-stop input.
+        This is useful for inputs that are not created by the I/O backend, such
+        as keyboard or HMI inputs. Mutually exclusive with ``emergency_pin``.
+    reset_input:
+        Optional existing memory variable used as local reset input. This is
+        useful for inputs that are not created by the I/O backend, such as
+        keyboard or HMI inputs. Mutually exclusive with ``reset_pin``.
     """
 
     emergency_pin: str | int | None = None
@@ -79,6 +87,8 @@ class EmergencyConfig:
     global_emergency: MemoryVariable | None = None
     latch_global_on_local_emergency: bool = True
     clear_global_on_recover: bool = True
+    emergency_input: MemoryVariable | None = None
+    reset_input: MemoryVariable | None = None
 
 
 class AbstractPLC(ABC):
@@ -247,11 +257,9 @@ class AbstractPLC(ABC):
 
     def emergency_is_active(self) -> bool:
         """Return ``True`` when local or global emergency conditions are active."""
-        local_active = False
-        if self.emergency_button is not None:
-            local_active = not self.emergency_button.active
-            if local_active and self.emergency_config.latch_global_on_local_emergency:
-                self._set_global_emergency(True)
+        local_active = self._local_emergency_is_active()
+        if local_active and self.emergency_config.latch_global_on_local_emergency:
+            self._set_global_emergency(True)
 
         global_active = (
             self.emergency_config.global_emergency.active
@@ -269,7 +277,7 @@ class AbstractPLC(ABC):
         emergency flag is still active, a local reset may only recover this PLC
         when this PLC is configured to clear that global flag.
         """
-        if self.emergency_button is not None and not self.emergency_button.active:
+        if self._local_emergency_is_active():
             return False
 
         global_emergency = self.emergency_config.global_emergency
@@ -292,6 +300,13 @@ class AbstractPLC(ABC):
             or not global_active
             or self.emergency_config.clear_global_on_recover
         )
+
+    def _local_emergency_is_active(self) -> bool:
+        if self.emergency_button is None:
+            return False
+        if self.emergency_config.emergency_nc_contact:
+            return not self.emergency_button.active
+        return self.emergency_button.active
 
     def force_outputs_off(self) -> None:
         """Set all output register values to ``False``."""
@@ -459,19 +474,35 @@ class AbstractPLC(ABC):
 
     def _setup_standard_emergency_inputs(self) -> None:
         cfg = self.emergency_config
-        if cfg.emergency_pin is not None:
+
+        if cfg.emergency_pin is not None and cfg.emergency_input is not None:
+            raise ConfigurationError(
+                "emergency_pin and emergency_input cannot both be configured."
+            )
+        if cfg.reset_pin is not None and cfg.reset_input is not None:
+            raise ConfigurationError(
+                "reset_pin and reset_input cannot both be configured."
+            )
+
+        if cfg.emergency_input is not None:
+            self.emergency_button = cfg.emergency_input
+        elif cfg.emergency_pin is not None:
             self.emergency_button = self.add_digital_input(
                 cfg.emergency_pin,
                 cfg.emergency_label,
                 NC_contact=cfg.emergency_nc_contact,
             )
-            if cfg.emergency_label.isidentifier():
-                setattr(self, cfg.emergency_label, self.emergency_button)
 
-        if cfg.reset_pin is not None:
+        if self.emergency_button is not None and cfg.emergency_label.isidentifier():
+            setattr(self, cfg.emergency_label, self.emergency_button)
+
+        if cfg.reset_input is not None:
+            self.reset_button = cfg.reset_input
+        elif cfg.reset_pin is not None:
             self.reset_button = self.add_digital_input(cfg.reset_pin, cfg.reset_label)
-            if cfg.reset_label.isidentifier():
-                setattr(self, cfg.reset_label, self.reset_button)
+
+        if self.reset_button is not None and cfg.reset_label.isidentifier():
+            setattr(self, cfg.reset_label, self.reset_button)
 
     def _set_global_emergency(self, value: bool) -> None:
         if self.emergency_config.global_emergency is not None:
